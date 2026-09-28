@@ -27,6 +27,8 @@ Anything that isn't a command ("who wrote Hamlet") goes to Claude Haiku via Open
   - **Fish Audio:** [https://fish.audio/?fpr=henryk](https://fish.audio/?fpr=henryk). Sign in, then create a key on the API keys page in your account. You don't need a paid plan or API credit: the `s2.1-pro-free` model this app uses is free on the API until the end of November 2026.
   - **OpenRouter (optional):** [https://openrouter.ai](https://openrouter.ai), only used to answer questions
 
+
+
 ### Don't have Python?
 
 Check in Terminal:
@@ -39,6 +41,8 @@ If that prints a version, you're set. If not, pick one:
 
 - **Easiest:** download the macOS installer from [python.org/downloads](https://www.python.org/downloads/) and run it.
 - **With Homebrew:** `brew install python`
+
+
 
 ## Setup
 
@@ -66,11 +70,13 @@ The window goes green when it's ready. The switch in the bottom right picks how 
 - **Hold Option:** hold right Option, talk, let go.
 - **Hey Jev:** always listening. Say "Hey Jev, open Spotify" in one go, or say "Hey Jev", wait for her reply, then give the command.
 
+
+
 ### Or let Claude Code set it up
 
 Paste this into Claude Code with the repo link:
 
-> Clone https://github.com/henryklunaris/hey-jev and set it up on my Mac. Check Python 3 is installed and help me install it if not. Create a venv from requirements.txt, build the app with `python setup.py py2app -A`, then tell me which API keys I need, where to get them, and which macOS permissions to grant. Then open the app from the dist folder.
+> Clone [https://github.com/henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) and set it up on my Mac. Check Python 3 is installed and help me install it if not. Create a venv from requirements.txt, build the app with `python setup.py py2app -A`, then tell me which API keys I need, where to get them, and which macOS permissions to grant. Then open the app from the dist folder.
 
 Use Claude Code (the terminal, or the Code tab in the desktop app). The chat side of Claude Desktop runs commands in a Linux sandbox, not on your Mac, so the Mac only packages fail there.
 
@@ -80,6 +86,8 @@ Use Claude Code (the terminal, or the Code tab in the desktop app). The chat sid
 - **Close** hides the window but keeps it listening. Click the Dock icon to bring it back.
 - **Keep on Top** in the Window menu (Cmd+T) keeps it above other apps. Off by default.
 - **Quit** with Cmd+Q.
+
+
 
 ## Running from the terminal
 
@@ -112,6 +120,8 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - **Whisper:** free, runs on your Mac.
 - **OpenRouter (questions only):** Claude Haiku, about $0.0002 per answer.
 
+
+
 ## Troubleshooting
 
 - **Holding Option does nothing.** The app needs Accessibility access. Add it under System Settings > Privacy & Security > Accessibility, then quit and reopen it.
@@ -119,6 +129,8 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - **The app won't open again.** It's probably still running with the window closed. Click its Dock icon, or quit it properly with Cmd+Q and open it again.
 - **Checking what happened.** Every phrase it heard, what Jev decided and what she said is logged to `~/Library/Logs/Hey Jev.log`.
 - **It stopped controlling apps after a macOS update.** Updates can reset permissions. Check Microphone, Accessibility and Automation under Privacy & Security again.
+
+
 
 ## Files
 
@@ -128,6 +140,8 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`
 - `assets/` the app icon
 
+
+
 ## Change the voice
 
-`VOICE_ID` at the top of `siri.py`. Find voices at [https://fish.audio](https://fish.audio), open one and copy its ID from the page link. Her replies re-render in the new voice automatically on the next launch.
+`VOICE_ID` at the top of `siri.py`. Find voices at [https://fish.audio/?fpr=henryk](https://fish.audio/?fpr=henryk) open one and copy its ID from the page link. Her replies re-render in the new voice automatically on the next launch.

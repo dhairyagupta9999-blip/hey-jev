@@ -24,6 +24,17 @@ SAVE_CLIPS = os.path.expanduser("~/Library/Logs/Hey Jev clips")  # set to None t
 WAKE = re.compile(r"(?:^\W*a|\b(?:hey|hi|hay|okay|ok))\W+(?:jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav)\b\W*", re.I)
 WAKE_WINDOW = 10.0
 
+# Add an app with a line in apps.json: "name": "App Name", or {"app", "say", "heard_as"} for extras
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps.json")) as f:
+    _apps = json.load(f)
+APPS = {k: v if isinstance(v, str) else v["app"] for k, v in _apps.items()}
+APP_SAY = {k: v if isinstance(v, str) else v.get("say", v["app"]) for k, v in _apps.items()}
+# "heard_as" in apps.json: things Whisper writes instead of the app name, swapped back before Jev sees the text
+HEARD_AS = [(re.compile(r"\b(?:" + "|".join(map(re.escape, sorted(v["heard_as"], key=len, reverse=True))) + r")\b", re.I), APP_SAY[k])
+            for k, v in _apps.items() if isinstance(v, dict) and v.get("heard_as")]
+BROWSERS = ("chrome", "brave", "safari")
+DEFAULT_BROWSER = "chrome"  # used for "new tab" when no browser is named or in front
+
 
 def reload_keys():
     global TS_KEY, FISH_KEY, OR_KEY
@@ -42,13 +53,18 @@ QUESTIONS = {
     "target": {"type": "choice", "instructions": "What is the primary thing being controlled?",
                "criteria": {"app": "an application", "volume": "sound level", "display": "screen appearance or dark mode",
                             "media": "music playback", "system": "locking or sleeping the computer",
-                            "timer": "setting, checking, or cancelling a timer or reminder"}},
+                            "timer": "setting, checking, or cancelling a timer or reminder",
+                            "browser": "opening a website or a new browser tab"}},
     "app": {"type": "choice", "instructions": "Which app, if any, is named?",
-            "criteria": {"spotify": None, "slack": None, "chrome": None, "vscode": None, "finder": None,
-                         "safari": None, "messages": None, "notes": None, "none": None}},
-    "app_action": {"type": "choice", "instructions": "What should happen to the app?",
+            "criteria": {**{k: None for k in APPS}, "none": None}},
+    "app_action": {"type": "choice", "instructions": "What should happen to the app? Every name in the app list is an application, so open or close with one of those names is about the app itself.",
                    "criteria": {"open": "open, launch, or start the app itself", "quit": "quit, close, or kill the app",
-                                "none": "the request is about playback, volume, or something inside the app, not opening or quitting it"}},
+                                "hide": "hide the app", "minimise": "minimise the app's windows",
+                                "focus": "switch to, show, or bring the app to the front",
+                                "none": "the request is about playback, volume, a website, a tab, or something inside the app"}},
+    "browser_action": {"type": "choice", "instructions": "What should happen in the web browser, if anything?",
+                       "criteria": {"new_tab": "open a new empty tab", "open_site": "go to or open a specific website",
+                                    "none": None}},
     "volume_action": {"type": "choice", "instructions": "What should happen to the volume, if anything?",
                       "criteria": {"up": None, "down": None, "mute": None, "unmute": None,
                                    "set": "set to a specific level", "none": None}},
@@ -102,8 +118,6 @@ def jev(text, questions=None):
 
 
 # --------------------------------------------------------------------------- Mac actions
-APPS = {"spotify": "Spotify", "slack": "Slack", "chrome": "Google Chrome", "vscode": "Visual Studio Code",
-        "finder": "Finder", "safari": "Safari", "messages": "Messages", "notes": "Notes"}
 LEVELS = {"silent": 0, "quiet": 25, "medium": 50, "loud": 75, "max": 100}
 
 
@@ -146,9 +160,54 @@ def spotify_play(tries=12):
     raise RuntimeError("Spotify never started playing")
 
 
+def app_process(key):
+    """System Events handle for a running app, found by bundle id since process names differ (VS Code runs as "Code")."""
+    bid = osa(f'id of application "{APPS[key]}"')
+    return f'(first application process whose bundle identifier is "{bid}")'
+
+
+def front_browser():
+    front = osa('tell application "System Events" to get name of first application process whose frontmost is true')
+    return next((k for k in BROWSERS if APPS[k] == front), None)
+
+
+def find_url(text):
+    """'open youtube dot com' -> https://youtube.com. Falls back to the LLM for things like 'open the BBC'."""
+    t = re.sub(r"\s+dot\s+", ".", text, flags=re.I)
+    m = re.search(r"\b((?:[\w-]+\.)+(?:com|co\.uk|org|net|io|ai|dev|tv|app|me|uk|gov|edu)(?:/\S*)?)", t, re.I)
+    if m:
+        return "https://" + m[1].lower().rstrip(".,!?")
+    r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {OR_KEY}"},
+                      json={"model": LLM_MODEL, "max_tokens": 40,
+                            "messages": [{"role": "system", "content": "Reply with only the full https URL of the website the user wants to open, or NONE."},
+                                         {"role": "user", "content": text}]}, timeout=15)
+    r.raise_for_status()
+    url = r.json()["choices"][0]["message"]["content"].strip()
+    return url if url.startswith("http") else None
+
+
+def run_browser(action, key, text):
+    """New tab or open a site in the named browser, else the one in front. Returns (reply_key, fmt)."""
+    if action == "browser_new_tab":
+        name = APPS[key or front_browser() or DEFAULT_BROWSER]
+        open_app(name)
+        osa(f'tell application "{name}" to activate')
+        time.sleep(0.3)
+        osa('tell application "System Events" to keystroke "t" using command down')
+        return "browser_new_tab", {}
+    url = find_url(text)
+    if not url:
+        return "browser_no_site", {}
+    sh("open", "-a", APPS[key], url) if key else sh("open", url)
+    return "browser_open_site", {"site": re.sub(r"^https?://(www\.)?", "", url).split("/")[0]}
+
+
 ACTIONS = {
     "app_open": lambda a: open_app(APPS[a]),
     "app_quit": lambda a: osa(f'tell application "{APPS[a]}" to quit'),
+    "app_hide": lambda a: osa(f'tell application "System Events" to set visible of {app_process(a)} to false'),
+    "app_minimise": lambda a: osa(f'tell application "System Events" to set value of attribute "AXMinimized" of every window of {app_process(a)} to true'),
+    "app_focus": lambda a: osa(f'tell application "{APPS[a]}" to activate'),
     "volume_up": lambda _: osa(f"set volume output volume {min(100, volume() + 20)}"),
     "volume_down": lambda _: osa(f"set volume output volume {max(0, volume() - 20)}"),
     "volume_mute": lambda _: osa("set volume output muted true"),
@@ -172,8 +231,14 @@ ACTIONS = {
 
 # --------------------------------------------------------------------------- Scripted replies with Fish tags
 REPLIES = {
-    "app_open": ["[cheerful] {app}'s up.", "{app}, opening now.", "[chuckling] There you go, {app}."],
+    "app_open": ["[chuckling] There you go.", "Opening it up.", "[cheerful] Here you go."],
     "app_quit": ["{app}'s gone.", "[sighing] Closing {app}. Good riddance.", "Done, {app} is closed."],
+    "app_hide": ["{app}'s hidden.", "[chuckling] Out of sight, {app}."],
+    "app_minimise": ["Minimised {app}.", "{app}'s tucked away."],
+    "app_focus": ["Here's {app}.", "[cheerful] Switching to {app}."],
+    "browser_new_tab": ["New tab's open.", "[cheerful] Fresh tab for you."],
+    "browser_open_site": ["Opening {site}.", "[cheerful] Here's {site}."],
+    "browser_no_site": ["[clear throat] Which website?"],
     "volume_up": ["Louder it is.", "[cheerful] Turning it up.", "Up we go."],
     "volume_down": ["Bringing it down.", "[sighing] A little quieter.", "Turning it down."],
     "volume_mute": ["[sighing] Muting. Finally some quiet.", "Muted.", "Shh. Muted."],
@@ -213,7 +278,7 @@ REPLIES = {
 }
 
 
-TARGETS = ("app", "volume", "display", "media", "system", "timer")
+TARGETS = ("app", "volume", "display", "media", "system", "timer", "browser")
 SPEAK_FIRST = {"volume_mute", "system_lock", "system_sleep"}
 
 
@@ -402,7 +467,13 @@ def sub_action(ans, target):
         (app, ac), (action, aac) = ans["app"], ans["app_action"]
         if app == "none" or action == "none" or min(ac, aac) < GATE:
             return None
-        return (min(ac, aac), f"app_{action}", app, f"app_{action}", {"app": APPS[app]})
+        return (min(ac, aac), f"app_{action}", app, f"app_{action}", {"app": APP_SAY[app]})
+    if target == "browser":
+        action, conf = ans["browser_action"]
+        if action == "none" or conf < GATE:
+            return None
+        app = ans["app"][0] if ans["app"][0] in BROWSERS and ans["app"][1] >= GATE else None
+        return (conf, f"browser_{action}", app, f"browser_{action}", {})
     key = {"volume": "volume_action", "display": "display_action", "media": "media_action",
            "system": "system_action", "timer": "timer_action"}[target]
     action, conf = ans[key]
@@ -494,7 +565,7 @@ def all_scripted_lines():
     for key, lines in REPLIES.items():
         for line in lines:
             if "{app}" in line:
-                yield from (line.format(app=a) for a in APPS.values())
+                yield from (line.format(app=a) for a in APP_SAY.values())
             elif "{level}" in line:
                 yield from (line.format(level=l) for l in LEVELS)
             elif "{" not in line:  # lines with a live value like {left} are generated when needed
@@ -523,9 +594,19 @@ def emit(notify, state, detail=""):
         notify(state, detail)
 
 
+def fix_names(text):
+    for rx, name in HEARD_AS:
+        text = rx.sub(name, text)
+    return text
+
+
 def handle(text, stt_ms=None, notify=None, quiet=False):
     global misses
     print(f"\n> heard: {text!r}" + (f"  (stt {stt_ms}ms)" if stt_ms is not None else ""))
+    fixed = fix_names(text)
+    if fixed != text:
+        print(f"  fixed: {fixed!r}")
+        text = fixed
     if not text.strip():
         emit(notify, "Ready", "Didn't catch anything")
         return
@@ -568,6 +649,8 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
                     emit(notify, "Doing it", text)
                     if action.startswith("timer_"):
                         timer_reply = run_timer(action, text)
+                    elif action.startswith("browser_"):
+                        timer_reply = run_browser(action, arg, text)
                     else:
                         ACTIONS[action](arg)
                     print(f"  action: {action} {arg or ''}")
