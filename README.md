@@ -117,6 +117,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - **Holding Option does nothing.** The app needs Accessibility access. Add it under System Settings > Privacy & Security > Accessibility, then quit and reopen it.
 - **"401 Unauthorized" in the window.** One of your keys is wrong or expired. Re-paste it with the Keys… button. If you also have a `.env`, check the key there, because it wins over the Keychain.
 - **The app won't open again.** It's probably still running with the window closed. Click its Dock icon, or quit it properly with Cmd+Q and open it again.
+- **Checking what happened.** Every phrase it heard, what Jev decided and what she said is logged to `~/Library/Logs/Hey Jev.log`.
 - **It stopped controlling apps after a macOS update.** Updates can reset permissions. Check Microphone, Accessibility and Automation under Privacy & Security again.
 
 ## Files

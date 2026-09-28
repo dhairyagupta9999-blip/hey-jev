@@ -15,10 +15,14 @@ SAMPLE_RATE = 16000
 GATE = 0.65
 WHISPER_MODEL = "small.en"
 COMMAND_PROMPT = "Open Spotify. Set a timer for five minutes. Play. Pause. Next track. Turn Spotify down. Turn the Mac volume down. Mute. Dark mode on. Lock the screen."
-WAKE_PROMPT = "Hey Jev, open Spotify. Hey Jev, pause the music. Hey Jev, turn the volume down."
-# Whisper often hears "Jev" as Jeff or Jeb, so accept the close ones
-WAKE = re.compile(r"^\W*(?:hey|hi|hay|okay|ok|a)\W+(?:jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav)\b\W*", re.I)
-WAKE_WINDOW = 6.0
+# No prompt in wake mode: on noise Whisper echoes the prompt back, which looked like a real "Hey Jev"
+WAKE_PROMPT = None
+NO_SPEECH_MAX = 0.6  # Whisper's own "this probably isn't speech" score, above this the segment is dropped
+WAKE_CHIME = "/System/Library/Sounds/Tink.aiff"
+SAVE_CLIPS = os.path.expanduser("~/Library/Logs/Hey Jev clips")  # set to None to stop saving ignored phrases
+# Whisper often hears "Jev" as Jeff or Jeb, so accept the close ones; can be mid-phrase since calls run sentences together
+WAKE = re.compile(r"(?:^\W*a|\b(?:hey|hi|hay|okay|ok))\W+(?:jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav)\b\W*", re.I)
+WAKE_WINDOW = 10.0
 
 
 def reload_keys():
@@ -183,7 +187,7 @@ REPLIES = {
     "display_dark_on": ["[chuckling] Lights off.", "Dark mode on.", "Going dark."],
     "display_dark_off": ["[cheerful] Let there be light.", "Dark mode off.", "Back to light."],
     "display_toggle": ["Flipped it.", "There, switched."],
-    "media_play": ["[cheerful] Playing.", "Music's on.", "Here we go."],
+    "media_play": ["[cheerful] Playing.", "Putting the music on.", "Here we go."],
     "media_pause": ["Paused.", "[sighing] Pausing. Take your time.", "Holding it there."],
     "media_next": ["Skipping.", "[chuckling] Not a fan? Next one.", "Next track."],
     "media_previous": ["Going back one.", "Previous track.", "[chuckling] Again? Sure."],
@@ -519,7 +523,7 @@ def emit(notify, state, detail=""):
         notify(state, detail)
 
 
-def handle(text, stt_ms=None, notify=None):
+def handle(text, stt_ms=None, notify=None, quiet=False):
     global misses
     print(f"\n> heard: {text!r}" + (f"  (stt {stt_ms}ms)" if stt_ms is not None else ""))
     if not text.strip():
@@ -535,6 +539,10 @@ def handle(text, stt_ms=None, notify=None):
     if kind == "split":
         payload = split_actions(text, ans)
         kind = "actions" if payload else "clarify"
+    if kind == "clarify" and quiet:
+        print("  (unclear follow up, staying quiet)")
+        emit(notify, "Ready", "Didn't catch that")
+        return
     if kind == "clarify":
         misses += 1
         line = say_line("give_up") if misses >= 2 else say_line("clarify")
@@ -649,16 +657,25 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
     busy = threading.Lock()
     armed_until = [0.0]
 
-    def transcribe(audio, prompt):
+    def transcribe(audio, prompt, drop_noise=False):
         t = time.time()
         segs, _ = model.transcribe(audio, language="en", beam_size=1, vad_filter=True, initial_prompt=prompt)
+        segs = [s for s in segs if not drop_noise or s.no_speech_prob <= NO_SPEECH_MAX]
         return " ".join(s.text.strip() for s in segs).strip(), int((time.time() - t) * 1000)
 
-    def run_turn(text, stt_ms):
+    def save_clip(audio):
+        if not SAVE_CLIPS:
+            return
+        os.makedirs(SAVE_CLIPS, exist_ok=True)
+        path = os.path.join(SAVE_CLIPS, time.strftime("%H-%M-%S") + ".wav")
+        sf.write(path, audio, SAMPLE_RATE)
+        print(f"  clip: {path}")
+
+    def run_turn(text, stt_ms, quiet=False):
         with busy:
             rec.paused = True  # don't hear her own reply
             try:
-                handle(text, stt_ms, notify)
+                handle(text, stt_ms, notify, quiet)
             except Exception as exc:
                 print(f"\n  turn failed: {exc}")
                 emit(notify, "Something went wrong", str(exc))
@@ -688,30 +705,36 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
                 continue
             if not rec.wake or busy.locked():
                 continue
-            try:
-                text, ms = transcribe(audio, WAKE_PROMPT)
+            try:  # one bad phrase must never kill the wake thread
+                wake_turn(audio)
             except Exception as exc:
-                print(f"\n  transcribe failed: {exc}")
-                continue
-            m = WAKE.match(text)
-            if m:
-                rest = text[m.end():].strip(" .,!?")
-                if rest:
-                    armed_until[0] = 0
-                    run_turn(rest, ms)
-                else:
-                    with busy:
-                        rec.paused = True
-                        say(say_line("wake"), notify)
-                        time.sleep(0.2)
-                        rec.paused = False
-                    armed_until[0] = time.time() + WAKE_WINDOW
-                    emit(notify, "Listening", "Go ahead\u2026")
-            elif armed_until[0] and time.time() < armed_until[0]:
+                print(f"\n  wake turn failed: {exc}")
+
+    def wake_turn(audio):
+        text, ms = transcribe(audio, WAKE_PROMPT, drop_noise=True)
+        m = WAKE.search(text)
+        if m:
+            print(f"\n  (wake: {text!r})")
+            rest = text[m.end():].strip(" .,!?")
+            if rest:
                 armed_until[0] = 0
-                run_turn(text, ms)
-            elif text:
-                print(f"\n  (not for me: {text!r})")
+                run_turn(rest, ms)
+            else:
+                with busy:
+                    rec.paused = True
+                    try:
+                        subprocess.run(["afplay", WAKE_CHIME])
+                        time.sleep(0.2)
+                    finally:
+                        rec.paused = False
+                armed_until[0] = time.time() + WAKE_WINDOW
+                emit(notify, "Listening", "Go ahead\u2026")
+        elif armed_until[0] and time.time() < armed_until[0]:
+            armed_until[0] = 0
+            run_turn(text, ms, quiet=True)
+        elif text:
+            print(f"\n  (not for me: {text!r})")
+            save_clip(audio)
 
     def set_mode(new):
         rec.wake = new == "wake"
