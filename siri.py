@@ -21,7 +21,9 @@ NO_SPEECH_MAX = 0.6  # Whisper's own "this probably isn't speech" score, above t
 WAKE_CHIME = "/System/Library/Sounds/Tink.aiff"
 SAVE_CLIPS = os.path.expanduser("~/Library/Logs/Hey Jev clips")  # set to None to stop saving ignored phrases
 # Whisper often hears "Jev" as Jeff or Jeb, so accept the close ones; can be mid-phrase since calls run sentences together
-WAKE = re.compile(r"(?:^\W*a|\b(?:hey|hi|hay|okay|ok))\W+(?:jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav)\b\W*", re.I)
+NAMES = "jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav"
+# A soft "hey" can get swallowed, so a bare "Jeff," at the very start counts too, but only with the comma ("Jeff said..." doesn't)
+WAKE = re.compile(rf"(?:(?:^\W*a|\b(?:hey|hi|hay|okay|ok))\W+(?:{NAMES})\b|^\W*(?:{NAMES})\s*,)\W*", re.I)
 WAKE_WINDOW = 10.0
 
 # Add an app with a line in apps.json: "name": "App Name", or {"app", "say", "heard_as"} for extras
@@ -801,7 +803,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             rest = text[m.end():].strip(" .,!?")
             if rest:
                 armed_until[0] = 0
-                run_turn(rest, ms)
+                run_turn(rest, ms, quiet=bool(text[:m.start()].strip(" .,!?")))  # mid-sentence "hey Jeff" might just be chat
             else:
                 with busy:
                     rec.paused = True

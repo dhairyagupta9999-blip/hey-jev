@@ -11,7 +11,15 @@ A voice assistant for your Mac. Say "Hey Jev" or hold right Option, say a thing,
 
 ## What it can do
 
-Open or quit apps, Mac volume up / down / mute / set, Spotify volume, play / pause / next / previous, dark mode, lock or sleep the Mac. Two things in one sentence work too: "pause Spotify and open Slack".
+Open, quit, hide, minimise or switch to apps, open a new browser tab or a website ("open youtube.com in Brave"), Mac volume up / down / mute / set, Spotify volume, play / pause / next / previous, dark mode, lock or sleep the Mac. Two things in one sentence work too: "pause Spotify and open Slack".
+
+### Adding apps
+
+Apps live in `apps.json`. Add a line like `"notion": "Notion"` (the name you say, then the app's name in /Applications) and restart. For apps the transcriber gets wrong, use the longer form with a `heard_as` list:
+
+```json
+"claude_code": {"app": "Claude", "say": "Claude Code", "heard_as": ["cloud code", "clawed code"]}
+```
 
 Timers and reminders: "set a timer for 5 minutes", "remind me in 20 minutes to call Mum", "how long is left?", "cancel the timer". Each one counts down live in the window, and she tells you when it's done.
 
@@ -135,6 +143,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 ## Files
 
 - `siri.py` all the logic: questions, actions, replies, Whisper, Fish, LLM fallback
+- `apps.json` the apps Jev can control
 - `assistant_ui.py` the status window, mode switch and Keys panel
 - `secrets_store.py` Keychain read / write
 - `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`
