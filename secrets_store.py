@@ -8,7 +8,8 @@ load_dotenv()  # so a .env works from the app bundle too, not just the terminal
 
 
 SERVICE = "com.jevsiri.keys"
-KEY_NAMES = ("TYPESAFE_API_KEY", "FISH_AUDIO_API_KEY", "OPENROUTER_API_KEY")
+KEY_NAMES = ("TYPESAFE_API_KEY", "FISH_AUDIO_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY")
+OPTIONAL = ("OPENAI_API_KEY",)  # only used for dictation, straight to OpenAI instead of OpenRouter
 
 
 def keychain_value(name):
@@ -40,5 +41,5 @@ def save_secret(name, value):
 
 
 def missing_secrets():
-    return [name for name in KEY_NAMES if not get_secret(name)]
+    return [name for name in KEY_NAMES if name not in OPTIONAL and not get_secret(name)]
 

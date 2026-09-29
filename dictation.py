@@ -14,10 +14,30 @@ FAILED_DIR = os.path.expanduser("~/Library/Logs/Hey Jev dictation failed")
 START = re.compile(r"^\W*(?:(?:please|can you|could you)\s+)?(?:start\s+)?(?:transcrib\w*|dictat\w*|take notes)"
                    r"(?:\s+(?:this|this meeting|this call|notes|mode|now|please|for me))?\W*$", re.I)
 
-# your own words go in vocabulary.json (gitignored), the example is the fallback
-VOCAB_FILE = next(p for p in (os.path.join(HERE, n) for n in ("vocabulary.json", "vocabulary.example.json")) if os.path.exists(p))
-with open(VOCAB_FILE) as f:
-    VOCAB = [(re.compile(r"\b" + re.escape(alt) + r"\b", re.I), word) for word, alts in json.load(f).items() for alt in alts]
+USER_VOCAB = os.path.join(HERE, "vocabulary.json")  # your own words, gitignored
+VOCAB = []
+
+
+def read_vocab():
+    path = USER_VOCAB if os.path.exists(USER_VOCAB) else os.path.join(HERE, "vocabulary.example.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_vocab():
+    global VOCAB
+    VOCAB = [(re.compile(r"\b" + re.escape(alt) + r"\b", re.I), word) for word, alts in read_vocab().items() for alt in alts]
+
+
+def save_vocab(words):
+    """words is {"Word": ["heard as", ...]}, saved to vocabulary.json and used straight away."""
+    with open(USER_VOCAB, "w", encoding="utf-8") as f:
+        json.dump(words, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    load_vocab()
+
+
+load_vocab()
 
 
 def fix_vocab(text):
@@ -94,13 +114,20 @@ class Dictation:
         for attempt in range(3):
             try:
                 t = time.time()
-                r = requests.post("https://openrouter.ai/api/v1/audio/transcriptions",
-                                  headers={"Authorization": f"Bearer {self.get_key()}"},
-                                  json={"model": MODEL, "language": "en", "provider": {"options": {"openai": {"prompt": PROMPT}}},  # OpenRouter only passes the prompt on this way
-                                        "input_audio": {"data": base64.b64encode(wav.getvalue()).decode(), "format": "wav"}},
-                                  timeout=90)
+                openai_key, openrouter_key = self.get_key()
+                if openai_key:  # straight to OpenAI, so the audio only goes to one company
+                    r = requests.post("https://api.openai.com/v1/audio/transcriptions",
+                                      headers={"Authorization": f"Bearer {openai_key}"},
+                                      data={"model": MODEL.split("/")[1], "language": "en", "prompt": PROMPT},
+                                      files={"file": ("dictation.wav", wav.getvalue(), "audio/wav")}, timeout=90)
+                else:
+                    r = requests.post("https://openrouter.ai/api/v1/audio/transcriptions",
+                                      headers={"Authorization": f"Bearer {openrouter_key}"},
+                                      json={"model": MODEL, "language": "en", "provider": {"options": {"openai": {"prompt": PROMPT}}},  # OpenRouter only passes the prompt on this way
+                                            "input_audio": {"data": base64.b64encode(wav.getvalue()).decode(), "format": "wav"}},
+                                      timeout=90)
                 if not r.ok:
-                    print(f"  openrouter said: {r.status_code} {r.text[:200]}")
+                    print(f"  {'openai' if openai_key else 'openrouter'} said: {r.status_code} {r.text[:200]}")
                 r.raise_for_status()
                 text = r.json().get("text", "").strip()
                 print(f"  dictation chunk {len(audio) / self.rate:.0f}s -> {len(text.split())} words  {int((time.time() - t) * 1000)}ms")

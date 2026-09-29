@@ -15,7 +15,7 @@ Open, quit, hide, minimise or switch to apps, open a new browser tab or a websit
 
 ### Adding apps
 
-Apps live in `apps.json`. Add a line like `"notion": "Notion"` (the name you say, then the app's name in /Applications) and restart. For apps the transcriber gets wrong, use the longer form with a `heard_as` list:
+Add, remove or fix apps in the **Apps** tab of the window, then restart Jev. They're saved to `apps.json`, where you can also add a line by hand like `"notion": "Notion"` (the name you say, then the app's name in /Applications) and restart. For apps the transcriber gets wrong, use the longer form with a `heard_as` list:
 
 ```json
 "claude_code": {"app": "Claude", "say": "Claude Code", "heard_as": ["cloud code", "clawed code"]}
@@ -25,9 +25,9 @@ Timers and reminders: "set a timer for 5 minutes", "remind me in 20 minutes to c
 
 Dictation: say "Hey Jev, transcribe" and a little waveform bubble shows at the bottom of the screen. Talk as long as you like, then say "Hey Jev, stop transcribing" and the text is pasted where your cursor is (and left on the clipboard). It uses `gpt-4o-mini-transcribe` through your OpenRouter key, so no extra key. Every dictation is saved to `~/Library/Logs/Hey Jev dictation.jsonl`.
 
-To fix words it gets wrong, copy `vocabulary.example.json` to `vocabulary.json` and add your own. Each word is followed by the ways it gets misheard. Your `vocabulary.json` is gitignored, so it stays private.
+To fix words it gets wrong, open the **Dictionary** tab in the window: add a word and the ways it gets misheard, and it's used straight away. It saves to `vocabulary.json`, which is gitignored so your words stay private (`vocabulary.example.json` is the starter list).
 
-**Privacy note:** dictation is optional, and it's the one feature that sends your voice off your Mac. The audio between "transcribe" and "stop transcribing" is uploaded to OpenRouter, which passes it to OpenAI's `gpt-4o-mini-transcribe`. If you don't want your audio leaving your Mac, just don't use dictation. Everything else Jev hears is transcribed locally by Whisper, and only the text of your commands after "Hey Jev" is sent to TypeSafe.
+**Privacy note:** dictation is optional, and it's the one feature that sends your voice off your Mac. The audio between "transcribe" and "stop transcribing" is uploaded to OpenRouter, which passes it to OpenAI's `gpt-4o-mini-transcribe`. Add an OpenAI key in Keys and it goes straight to OpenAI instead, so only one company sees it. If you don't want your audio leaving your Mac, just don't use dictation. Everything else Jev hears is transcribed locally by Whisper, and only the text of your commands after "Hey Jev" is sent to TypeSafe.
 
 Anything that isn't a command ("who wrote Hamlet") goes to Claude Haiku via OpenRouter and gets spoken back.
 
@@ -39,7 +39,8 @@ Anything that isn't a command ("who wrote Hamlet") goes to Claude Haiku via Open
 - Three API keys:
   - **TypeSafe (Jev):** [https://typesafe.ai](https://typesafe.ai)
   - **Fish Audio:** [https://fish.audio/?fpr=henryk](https://fish.audio/?fpr=henryk). Sign in, then create a key on the API keys page in your account. You don't need a paid plan or API credit: the `s2.1-pro-free` model this app uses is free on the API until the end of November 2026.
-  - **OpenRouter (optional):** [https://openrouter.ai](https://openrouter.ai), only used to answer questions
+  - **OpenRouter:** [https://openrouter.ai](https://openrouter.ai), answers questions and does dictation
+  - **OpenAI (optional):** [https://platform.openai.com](https://platform.openai.com), sends dictation straight to OpenAI instead of through OpenRouter
 
 
 
@@ -73,13 +74,13 @@ The py2app line builds the app bundle in alias mode, so it runs the code straigh
 
 First launch:
 
-1. The Keys panel opens. Paste your three keys, they're saved in your Mac Keychain. Change them any time with the **Keys…** button.
+1. The window opens on the **Keys** tab. Paste your keys and hit Save keys, they're saved in your Mac Keychain. Change them any time in the same tab.
 2. Whisper downloads its `small.en` model (about 250MB), one time.
 3. macOS will ask for **Microphone** access. Say yes.
 4. Add "Hey Jev - Fish Audio" (or your terminal, if you run from the terminal) under **System Settings > Privacy & Security > Accessibility**, or key presses are ignored.
 5. The first time it quits an app or toggles dark mode you'll get an **Automation** prompt. Say yes.
 
-The window goes green when it's ready. The switch in the bottom right picks how you talk to it:
+The dot at the top goes green when it's ready. The switch in the top right picks how you talk to it:
 
 - **Hold Option:** hold right Option, talk, let go.
 - **Hey Jev:** always listening. Say "Hey Jev, open Spotify" in one go, or say "Hey Jev", wait for her reply, then give the command.
@@ -114,7 +115,7 @@ Useful for seeing the Jev trace (every question, answer and confidence per turn)
 .venv/bin/python siri.py --ui          # same as the app, but shows as "Python" in the Dock
 ```
 
-Keys can also go in a `.env` file in this folder (`TYPESAFE_API_KEY`, `FISH_AUDIO_API_KEY`, `OPENROUTER_API_KEY`). A key in `.env` takes priority over the one saved in the Keychain.
+Keys can also go in a `.env` file in this folder (`TYPESAFE_API_KEY`, `FISH_AUDIO_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`). A key in `.env` takes priority over the one saved in the Keychain.
 
 ## How it works
 
@@ -139,7 +140,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 ## Troubleshooting
 
 - **Holding Option does nothing.** The app needs Accessibility access. Add it under System Settings > Privacy & Security > Accessibility, then quit and reopen it.
-- **"401 Unauthorized" in the window.** One of your keys is wrong or expired. Re-paste it with the Keys… button. If you also have a `.env`, check the key there, because it wins over the Keychain.
+- **"401 Unauthorized" in the window.** One of your keys is wrong or expired. Re-paste it in the Keys tab. If you also have a `.env`, check the key there, because it wins over the Keychain.
 - **The app won't open again.** It's probably still running with the window closed. Click its Dock icon, or quit it properly with Cmd+Q and open it again.
 - **Checking what happened.** Every phrase it heard, what Jev decided and what she said is logged to `~/Library/Logs/Hey Jev.log`.
 - **It stopped controlling apps after a macOS update.** Updates can reset permissions. Check Microphone, Accessibility and Automation under Privacy & Security again.
@@ -151,7 +152,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - `siri.py` all the logic: questions, actions, replies, Whisper, Fish, LLM fallback
 - `apps.json` the apps Jev can control
 - `dictation.py` and `bubble.py` dictation and its waveform bubble, `vocabulary.example.json` its word fixes (copy to `vocabulary.json`)
-- `assistant_ui.py` the status window, mode switch and Keys panel
+- `assistant_ui.py` the window: status, mode switch, and the Home (stats), Dictionary, Apps, Dictation history, Privacy and Keys tabs
 - `secrets_store.py` Keychain read / write
 - `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`
 - `assets/` the app icon

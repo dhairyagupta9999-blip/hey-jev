@@ -10,6 +10,7 @@ load_dotenv()
 TS_KEY = get_secret("TYPESAFE_API_KEY")
 FISH_KEY = get_secret("FISH_AUDIO_API_KEY")
 OR_KEY = get_secret("OPENROUTER_API_KEY")
+OA_KEY = get_secret("OPENAI_API_KEY")
 VOICE_ID = "9a9cf47702da476aa4629e2506d4a857"
 PTT_KEY = keyboard.Key.alt_r
 SAMPLE_RATE = 16000
@@ -42,10 +43,11 @@ DEFAULT_BROWSER = "chrome"  # used for "new tab" when no browser is named or in 
 
 
 def reload_keys():
-    global TS_KEY, FISH_KEY, OR_KEY
+    global TS_KEY, FISH_KEY, OR_KEY, OA_KEY
     TS_KEY = get_secret("TYPESAFE_API_KEY")
     FISH_KEY = get_secret("FISH_AUDIO_API_KEY")
     OR_KEY = get_secret("OPENROUTER_API_KEY")
+    OA_KEY = get_secret("OPENAI_API_KEY")
 
 # --------------------------------------------------------------------------- Jev
 QUESTIONS = {
@@ -747,7 +749,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
     rec = Recorder()
     busy = threading.Lock()
     armed_until = [0.0]
-    dictation = Dictation(NAMES, lambda: OR_KEY, SAMPLE_RATE)
+    dictation = Dictation(NAMES, lambda: (OA_KEY, OR_KEY), SAMPLE_RATE)
 
     def transcribe(audio, prompt, drop_noise=False):
         t = time.time()
@@ -782,9 +784,9 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
 
     def start_dictation():
         print(f"\n> dictation started")
-        if not OR_KEY:
-            say("Add an OpenRouter key first.", notify)
-            emit(notify, "Ready", "Dictation needs an OpenRouter key")
+        if not (OA_KEY or OR_KEY):
+            say("Add an OpenRouter or OpenAI key first.", notify)
+            emit(notify, "Ready", "Dictation needs an OpenRouter or OpenAI key")
             return
         MIC_LEVELS.clear()
         emit(notify, "Dictating", "Say \u201cstop transcribing\u201d when you\u2019re done")  # bubble shows with the pop
