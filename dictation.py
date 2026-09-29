@@ -91,22 +91,25 @@ class Dictation:
             self.buffer = []
 
     def finish(self):
-        """Wait for every chunk and return the finished text."""
+        """Wait for every chunk, returns (text, failed chunks, total chunks)."""
         self._send()
         self.active = False
-        parts = []
-        for chunk in self.chunks:
+        parts, failed = [], 0
+        for i, chunk in enumerate(self.chunks):
             try:
                 parts.append(chunk.result())
             except Exception as exc:
-                print(f"  dictation chunk failed: {exc}")
+                failed += 1
+                parts.append("[missing part]")  # marks the gap, so it's obvious something is missing
+                print(f"  dictation chunk {i + 1} of {len(self.chunks)} failed: {exc}")
         text = " ".join(p for p in parts if p)
         text = self.stop_rx.sub("", text).strip(" ,")
         text = fix_vocab(strip_prompt(text)) if text else ""
         if text:
             with open(HISTORY, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text}) + "\n")
-        return text
+                entry = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text, **({"failed_parts": failed} if failed else {})}
+                f.write(json.dumps(entry) + "\n")
+        return text, failed, len(self.chunks)
 
     def _transcribe(self, audio):
         wav = io.BytesIO()

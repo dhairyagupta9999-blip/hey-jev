@@ -805,9 +805,14 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
         emit(notify, "Finishing", "Writing it up\u2026")
         subprocess.run(["afplay", DICTATE_CHIME])
         try:
-            text = dictation.finish()
+            text, failed, total = dictation.finish()
             print(f"  dictation: {text!r}")
-            if text:
+            if failed:  # never paste a dictation with holes in it as if it worked
+                if text.replace("[missing part]", "").strip():
+                    subprocess.run(["pbcopy"], input=text.encode(), check=True)
+                emit(notify, "Something went wrong", f"{failed} of {total} parts failed, not pasted. What worked is on your "
+                     "clipboard, and the missing audio is in Logs/Hey Jev dictation failed")
+            elif text:
                 paste(text)
                 emit(notify, "Ready", f"Pasted {len(text.split())} words")
             else:
@@ -874,7 +879,9 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
         rec.wake = new == "wake"
         armed_until[0] = 0
         print(f"\n[mode: {'always listening' if rec.wake else 'hold right Option'}]")
-        if not busy.locked():
+        if rec.dictating:  # dictation carries on in either mode, so keep the bubble up until it's stopped
+            emit(notify, "Dictating", "Say \u201cstop transcribing\u201d when you\u2019re done")
+        elif not busy.locked():
             emit(notify, "Ready", ready_text(rec.wake))
 
     def start_recording():
