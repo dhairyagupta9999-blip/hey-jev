@@ -72,6 +72,7 @@ class Dictation:
 
     def start(self):
         self.active, self.started = True, time.time()
+        self.stamp = time.strftime("%Y-%m-%d %H-%M-%S")
         self.buffer, self.chunks = [], []
 
     def timed_out(self):
@@ -87,7 +88,7 @@ class Dictation:
 
     def _send(self):
         if self.buffer:
-            self.chunks.append(self.pool.submit(self._transcribe, np.concatenate(self.buffer)))
+            self.chunks.append(self.pool.submit(self._transcribe, np.concatenate(self.buffer), len(self.chunks) + 1))
             self.buffer = []
 
     def finish(self):
@@ -111,7 +112,7 @@ class Dictation:
                 f.write(json.dumps(entry) + "\n")
         return text, failed, len(self.chunks)
 
-    def _transcribe(self, audio):
+    def _transcribe(self, audio, part):
         wav = io.BytesIO()
         sf.write(wav, audio, self.rate, format="WAV")
         for attempt in range(3):
@@ -139,6 +140,6 @@ class Dictation:
                 if attempt == 2 or (isinstance(exc, requests.HTTPError) and exc.response.status_code < 500
                                     and exc.response.status_code != 429):
                     os.makedirs(FAILED_DIR, exist_ok=True)  # keep the audio so nothing is lost
-                    sf.write(os.path.join(FAILED_DIR, time.strftime("%Y-%m-%d %H-%M-%S") + ".wav"), audio, self.rate)
+                    sf.write(os.path.join(FAILED_DIR, f"{self.stamp} part {part}.wav"), audio, self.rate)  # one file per part, none overwritten
                     raise
                 time.sleep(2 ** attempt)

@@ -697,7 +697,17 @@ class Recorder:
         self._reset_segment()
         self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                                      blocksize=self.BLOCK, callback=self._cb)
-        self.stream.start()
+        self.mic_lock = threading.Lock()
+
+    def sync_mic(self):
+        """Mic only runs when something needs it, so Hold Option mode doesn't keep the orange dot on."""
+        with self.mic_lock:
+            needed = self.wake or self.dictating or self.on
+            if needed and not self.stream.active:
+                self._reset_segment()
+                self.stream.start()
+            elif not needed and self.stream.active:
+                self.stream.stop()
 
     def _reset_segment(self):
         self.speech, self.silent = [], 0
@@ -731,10 +741,13 @@ class Recorder:
 
     def start(self):
         self.frames, self.on = [], True
+        self.sync_mic()
 
     def stop(self):
         self.on = False
-        return np.concatenate(self.frames)[:, 0] if self.frames else np.zeros(0, dtype="float32")
+        audio = np.concatenate(self.frames)[:, 0] if self.frames else np.zeros(0, dtype="float32")
+        self.sync_mic()
+        return audio
 
 
 def ready_text(wake):
@@ -750,6 +763,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
     busy = threading.Lock()
     armed_until = [0.0]
     dictation = Dictation(NAMES, lambda: (OA_KEY, OR_KEY), SAMPLE_RATE)
+    late_timers = []  # timers that went off mid-dictation, announced once it stops
 
     def transcribe(audio, prompt, drop_noise=False):
         t = time.time()
@@ -793,6 +807,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
         subprocess.run(["afplay", DICTATE_CHIME])
         dictation.start()
         rec.dictating = True
+        rec.sync_mic()
 
     def dictate_turn(audio):
         heard, _ = transcribe(audio, None, drop_noise=True)  # local Whisper only listens for the stop phrase
@@ -802,6 +817,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
 
     def finish_dictation():
         rec.dictating = False
+        rec.sync_mic()
         emit(notify, "Finishing", "Writing it up\u2026")
         subprocess.run(["afplay", DICTATE_CHIME])
         try:
@@ -820,6 +836,10 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
         except Exception as exc:
             print(f"  dictation failed: {exc}")
             emit(notify, "Something went wrong", str(exc))
+        if late_timers:
+            time.sleep(2)  # let the dictation result show before she talks over it
+        while late_timers:
+            timer_done(late_timers.pop(0))
 
     def ptt_turn(audio):
         emit(notify, "Transcribing", "Working out what you said\u2026")
@@ -877,6 +897,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
 
     def set_mode(new):
         rec.wake = new == "wake"
+        rec.sync_mic()
         armed_until[0] = 0
         print(f"\n[mode: {'always listening' if rec.wake else 'hold right Option'}]")
         if rec.dictating:  # dictation carries on in either mode, so keep the bubble up until it's stopped
@@ -897,6 +918,11 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
                 threading.Thread(target=ptt_turn, args=(audio,), daemon=True).start()
 
     def timer_done(t):
+        if rec.dictating:  # don't pause the mic or talk over a dictation, just chime and tell her afterwards
+            late_timers.append(t)
+            emit(notify, "Dictating", f"\u23f0 {t['label'] or 'Timer finished'}, I'll tell you when you stop")
+            subprocess.run(["afplay", "/System/Library/Sounds/Glass.aiff"])
+            return
         with busy:
             rec.paused = True
             try:
