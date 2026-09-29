@@ -34,6 +34,7 @@ from AppKit import (
     NSWindowStyleMaskTitled,
 )
 from Foundation import NSObject, NSTimer, NSUserDefaults
+from bubble import Bubble
 from secrets_store import KEY_NAMES, get_secret, missing_secrets, save_secret
 
 
@@ -53,6 +54,8 @@ STATUS_COLORS = {
     "Speaking": NSColor.systemTealColor(),
     "Something went wrong": NSColor.systemRedColor(),
     "Time's up": NSColor.systemYellowColor(),
+    "Dictating": NSColor.systemRedColor(),
+    "Finishing": NSColor.systemBlueColor(),
 }
 
 
@@ -94,6 +97,7 @@ class AppDelegate(NSObject):
         self.panel.setContentView_(background)
         self.background = background
         self.timer_rows = []
+        self.bubble = Bubble()
 
         self.dot = label("●", NSMakeRect(25, 76, 24, 30), 18, NSColor.systemOrangeColor())
         self.status = label("Starting", NSMakeRect(55, 78, 330, 30), 22)
@@ -292,7 +296,7 @@ class AppDelegate(NSObject):
 
     def tick_(self, _timer):
         siri = sys.modules.get("siri")
-        timers = siri.timer_snapshot()[:3] if siri else []
+        timers = siri.timer_snapshot()[:3] if hasattr(siri, "timer_snapshot") else []  # siri may still be loading
         if len(timers) != len(self.timer_rows):
             self._layout_timer_rows(len(timers))
         for (name_view, time_view), (name, left) in zip(self.timer_rows, timers):
@@ -328,6 +332,10 @@ class AppDelegate(NSObject):
         self.status.setStringValue_(state)
         self.detail.setStringValue_(detail)
         self.dot.setTextColor_(STATUS_COLORS.get(state, NSColor.labelColor()))
+        if state in ("Dictating", "Finishing"):
+            self.bubble.show(working=state == "Finishing")
+        else:
+            self.bubble.hide()
 
     def applicationShouldTerminateAfterLastWindowClosed_(self, _application):
         return False  # keep listening with the window closed, the Dock icon reopens it

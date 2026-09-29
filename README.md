@@ -23,6 +23,12 @@ Apps live in `apps.json`. Add a line like `"notion": "Notion"` (the name you say
 
 Timers and reminders: "set a timer for 5 minutes", "remind me in 20 minutes to call Mum", "how long is left?", "cancel the timer". Each one counts down live in the window, and she tells you when it's done.
 
+Dictation: say "Hey Jev, transcribe" and a little waveform bubble shows at the bottom of the screen. Talk as long as you like, then say "Hey Jev, stop transcribing" and the text is pasted where your cursor is (and left on the clipboard). It uses `gpt-4o-mini-transcribe` through your OpenRouter key, so no extra key. Every dictation is saved to `~/Library/Logs/Hey Jev dictation.jsonl`.
+
+To fix words it gets wrong, copy `vocabulary.example.json` to `vocabulary.json` and add your own. Each word is followed by the ways it gets misheard. Your `vocabulary.json` is gitignored, so it stays private.
+
+**Privacy note:** dictation is optional, and it's the one feature that sends your voice off your Mac. The audio between "transcribe" and "stop transcribing" is uploaded to OpenRouter, which passes it to OpenAI's `gpt-4o-mini-transcribe`. If you don't want your audio leaving your Mac, just don't use dictation. Everything else Jev hears is transcribed locally by Whisper, and only the text of your commands after "Hey Jev" is sent to TypeSafe.
+
 Anything that isn't a command ("who wrote Hamlet") goes to Claude Haiku via OpenRouter and gets spoken back.
 
 ## What you need
@@ -144,6 +150,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 
 - `siri.py` all the logic: questions, actions, replies, Whisper, Fish, LLM fallback
 - `apps.json` the apps Jev can control
+- `dictation.py` and `bubble.py` dictation and its waveform bubble, `vocabulary.example.json` its word fixes (copy to `vocabulary.json`)
 - `assistant_ui.py` the status window, mode switch and Keys panel
 - `secrets_store.py` Keychain read / write
 - `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`

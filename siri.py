@@ -4,6 +4,7 @@ import numpy as np, requests, sounddevice as sd, soundfile as sf
 from dotenv import load_dotenv
 from pynput import keyboard
 from secrets_store import get_secret
+from dictation import Dictation, START as DICTATE_START, paste
 
 load_dotenv()
 TS_KEY = get_secret("TYPESAFE_API_KEY")
@@ -25,6 +26,8 @@ NAMES = "jev|jevs|jeff|jeffs|jef|jeb|jab|chev|jeve|jav"
 # A soft "hey" can get swallowed, so a bare "Jeff," at the very start counts too, but only with the comma ("Jeff said..." doesn't)
 WAKE = re.compile(rf"(?:(?:^\W*a|\b(?:hey|hi|hay|okay|ok))\W+(?:{NAMES})\b|^\W*(?:{NAMES})\s*,)\W*", re.I)
 WAKE_WINDOW = 10.0
+DICTATE_CHIME = "/System/Library/Sounds/Pop.aiff"
+MIC_LEVELS = collections.deque(maxlen=40)  # mic loudness while dictating, the bubble draws it
 
 # Add an app with a line in apps.json: "name": "App Name", or {"app", "say", "heard_as"} for extras
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps.json")) as f:
@@ -226,7 +229,8 @@ ACTIONS = {
     "media_play": lambda _: spotify_play(),
     "media_pause": lambda _: osa('tell application "Spotify" to pause'),
     "media_next": lambda _: osa('tell application "Spotify" to next track'),
-    "media_previous": lambda _: osa('tell application "Spotify" to previous track'),
+    # mid-song, one "previous" only restarts it, so press twice unless we're in the first 3 seconds
+    "media_previous": lambda _: osa('tell application "Spotify"\nif player position > 3 then\nprevious track\ndelay 0.3\nend if\nprevious track\nend tell'),
     "system_lock": lambda _: osa('tell application "System Events" to keystroke "q" using {control down, command down}'),
     "system_sleep": lambda _: sh("pmset", "sleepnow"),
 }
@@ -685,7 +689,7 @@ class Recorder:
 
     def __init__(self):
         self.frames, self.on = [], False
-        self.wake, self.paused = False, False
+        self.wake, self.paused, self.dictating = False, False, False
         self.segments = queue.Queue()
         self.noise = 0.005
         self._reset_segment()
@@ -700,12 +704,14 @@ class Recorder:
     def _cb(self, indata, *_):
         if self.on:
             self.frames.append(indata.copy())
-        if not self.wake or self.paused:
+        if not (self.wake or self.dictating) or self.paused:
             if self.speech:
                 self._reset_segment()
             return
         block = indata[:, 0].copy()
         rms = float(np.sqrt(np.mean(block ** 2)))
+        if self.dictating:
+            MIC_LEVELS.append(rms)
         loud = rms > max(self.noise * 3, 0.01)
         if not self.speech:
             if loud:
@@ -716,7 +722,7 @@ class Recorder:
             return
         self.speech.append(block)
         self.silent = 0 if loud else self.silent + 1
-        if self.silent >= 8 or len(self.speech) >= 150:  # 0.8s pause ends a phrase, 15s max
+        if self.silent >= 8 or len(self.speech) >= (300 if self.dictating else 150):  # 0.8s pause ends a phrase, 15s max (30s dictating)
             if len(self.speech) - self.silent >= 4:
                 self.segments.put(np.concatenate(self.speech))
             self._reset_segment()
@@ -741,6 +747,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
     rec = Recorder()
     busy = threading.Lock()
     armed_until = [0.0]
+    dictation = Dictation(NAMES, lambda: OR_KEY, SAMPLE_RATE)
 
     def transcribe(audio, prompt, drop_noise=False):
         t = time.time()
@@ -760,7 +767,10 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
         with busy:
             rec.paused = True  # don't hear her own reply
             try:
-                handle(text, stt_ms, notify, quiet)
+                if DICTATE_START.match(text.strip()):
+                    start_dictation()
+                else:
+                    handle(text, stt_ms, notify, quiet)
             except Exception as exc:
                 print(f"\n  turn failed: {exc}")
                 emit(notify, "Something went wrong", str(exc))
@@ -769,6 +779,40 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             finally:
                 time.sleep(0.3)
                 rec.paused = False
+
+    def start_dictation():
+        print(f"\n> dictation started")
+        if not OR_KEY:
+            say("Add an OpenRouter key first.", notify)
+            emit(notify, "Ready", "Dictation needs an OpenRouter key")
+            return
+        MIC_LEVELS.clear()
+        emit(notify, "Dictating", "Say \u201cstop transcribing\u201d when you\u2019re done")  # bubble shows with the pop
+        subprocess.run(["afplay", DICTATE_CHIME])
+        dictation.start()
+        rec.dictating = True
+
+    def dictate_turn(audio):
+        heard, _ = transcribe(audio, None, drop_noise=True)  # local Whisper only listens for the stop phrase
+        print(f"  (dictating: {heard!r})")
+        if dictation.add(audio, heard):
+            finish_dictation()
+
+    def finish_dictation():
+        rec.dictating = False
+        emit(notify, "Finishing", "Writing it up\u2026")
+        subprocess.run(["afplay", DICTATE_CHIME])
+        try:
+            text = dictation.finish()
+            print(f"  dictation: {text!r}")
+            if text:
+                paste(text)
+                emit(notify, "Ready", f"Pasted {len(text.split())} words")
+            else:
+                emit(notify, "Ready", "Didn't catch anything to paste")
+        except Exception as exc:
+            print(f"  dictation failed: {exc}")
+            emit(notify, "Something went wrong", str(exc))
 
     def ptt_turn(audio):
         emit(notify, "Transcribing", "Working out what you said\u2026")
@@ -784,14 +828,17 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             try:
                 audio = rec.segments.get(timeout=1)
             except queue.Empty:
+                if dictation.timed_out():
+                    finish_dictation()
                 if armed_until[0] and time.time() > armed_until[0]:
                     armed_until[0] = 0
                     emit(notify, "Ready", ready_text(rec.wake))
                 continue
-            if not rec.wake or busy.locked():
-                continue
             try:  # one bad phrase must never kill the wake thread
-                wake_turn(audio)
+                if rec.dictating:
+                    dictate_turn(audio)
+                elif rec.wake and not busy.locked():
+                    wake_turn(audio)
             except Exception as exc:
                 print(f"\n  wake turn failed: {exc}")
 
@@ -829,7 +876,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             emit(notify, "Ready", ready_text(rec.wake))
 
     def start_recording():
-        if not rec.wake and not rec.on and not busy.locked():
+        if not rec.wake and not rec.on and not rec.dictating and not busy.locked():
             rec.start()
             print("\n[listening]", end="", flush=True)
             emit(notify, "Listening", "Release right Option when you\u2019re done")
@@ -850,7 +897,10 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             finally:
                 time.sleep(0.3)
                 rec.paused = False
-        emit(notify, "Ready", ready_text(rec.wake))
+        if rec.dictating:
+            emit(notify, "Dictating", "Say \u201cstop transcribing\u201d when you\u2019re done")
+        else:
+            emit(notify, "Ready", ready_text(rec.wake))
 
     start_timer_loop(timer_done)
     threading.Thread(target=warm_cache, daemon=True).start()
