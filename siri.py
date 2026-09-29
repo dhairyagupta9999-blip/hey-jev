@@ -689,15 +689,35 @@ def say(line, notify):
 class Recorder:
     BLOCK = 1600  # 100ms at 16kHz
 
-    def __init__(self):
+    def __init__(self, mic=""):
         self.frames, self.on = [], False
         self.wake, self.paused, self.dictating = False, False, False
         self.segments = queue.Queue()
         self.noise = 0.005
         self._reset_segment()
-        self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                     blocksize=self.BLOCK, callback=self._cb)
+        self.stream = self._open(mic)
         self.mic_lock = threading.Lock()
+
+    def _open(self, mic):
+        if mic:
+            try:
+                return sd.InputStream(device=mic, samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                      blocksize=self.BLOCK, callback=self._cb)
+            except Exception as exc:
+                print(f"\n[mic {mic!r} not available, using the default: {exc}]")
+        return sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                              blocksize=self.BLOCK, callback=self._cb)
+
+    def set_device(self, mic):
+        """Swap to another microphone, carrying on listening if it was."""
+        with self.mic_lock:
+            was_active = self.stream.active
+            self.stream.close()
+            self.stream = self._open(mic)
+            if was_active:
+                self._reset_segment()
+                self.stream.start()
+        print(f"\n[mic: {mic or 'system default'}]")
 
     def sync_mic(self):
         """Mic only runs when something needs it, so Hold Option mode doesn't keep the orange dot on."""
@@ -754,12 +774,12 @@ def ready_text(wake):
     return "Say \u201cHey Jev\u201d and your command" if wake else "Ready when you are"
 
 
-def run_voice_assistant(notify=None, controls=None, mode="ptt"):
+def run_voice_assistant(notify=None, controls=None, mode="ptt", mic=""):
     from faster_whisper import WhisperModel
     print("loading whisper...")
     emit(notify, "Starting", "Loading Whisper\u2026")
     model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-    rec = Recorder()
+    rec = Recorder(mic)
     busy = threading.Lock()
     armed_until = [0.0]
     dictation = Dictation(NAMES, lambda: (OA_KEY, OR_KEY), SAMPLE_RATE)
@@ -947,6 +967,8 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt"):
             command = controls.get()
             if isinstance(command, tuple) and command[0] == "mode":
                 set_mode(command[1])
+            elif isinstance(command, tuple) and command[0] == "mic":
+                rec.set_device(command[1])
             elif command == "press":
                 start_recording()
             elif command == "release":

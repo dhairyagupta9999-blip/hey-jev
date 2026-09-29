@@ -24,6 +24,7 @@ from AppKit import (
     NSMenuItem,
     NSPasteboard,
     NSPasteboardTypeString,
+    NSPopUpButton,
     NSScrollView,
     NSSearchField,
     NSSecureTextField,
@@ -53,13 +54,16 @@ NORMAL, FLOATING = 0, 3  # NSNormalWindowLevel, NSFloatingWindowLevel
 SIDEBAR_MATERIAL = 7  # NSVisualEffectMaterialSidebar
 HINTS = {"ptt": "Hold right Option to talk", "wake": "Say “Hey Jev”, then your command"}
 MODES = ("ptt", "wake")
-TABS = (("home", "Home"), ("dict", "Dictionary"), ("apps", "Apps"), ("hist", "Dictation history"), ("priv", "Privacy"), ("keys", "Keys"))
+TABS = (("home", "Home"), ("dict", "Dictionary"), ("apps", "Apps"), ("hist", "Dictation history"), ("priv", "Privacy"), ("settings", "Settings"), ("keys", "Keys"))
 LOG_FILE = os.path.expanduser("~/Library/Logs/Hey Jev.log")
 TYPING_WPM, SPEAKING_WPM = 40, 150  # average typing vs talking speed, for "time saved"
 ACTION_NAMES = {"app_open": "Open app", "app_quit": "Quit app", "app_hide": "Hide app", "app_minimise": "Minimise",
                 "app_focus": "Switch to app", "media_play": "Play", "media_pause": "Pause", "media_next": "Next track",
                 "media_previous": "Previous track", "timer_set": "Timers", "timer_remind": "Reminders"}
 APPS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps.json")
+HOW_TO = ("“Hey Jev, open Spotify” runs a command. In Hold Option mode, hold right Option and just say it.\n"
+          "“Hey Jev, transcribe” starts dictating, with a bubble at the bottom of the screen. "
+          "Say “stop transcribing” and it pastes where your cursor is.")
 PRIVACY = (
     ("Stays on your Mac", "Everything the mic hears. Whisper listens for \u201cHey Jev\u201d on your Mac and throws away anything that isn't for her. Your dictionary, dictation history and logs stay in this folder and ~/Library/Logs."),
     ("TypeSafe (Jev)  \u00b7  text", "Only the words after \u201cHey Jev\u201d, like \u201copen Spotify\u201d, to work out what to do."),
@@ -130,6 +134,7 @@ class AppDelegate(NSObject):
         self.mode = defaults.stringForKey_("mode") or "ptt"
         if self.mode not in MODES:
             self.mode = "ptt"
+        self.mic = defaults.stringForKey_("mic") or ""
         style = (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
                  | NSWindowStyleMaskFullSizeContentView)
         self.panel = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -155,7 +160,7 @@ class AppDelegate(NSObject):
         self._build_sidebar(root)
         self._build_header(root)
         self.pages = {"home": self._build_home(), "dict": self._build_dictionary(), "apps": self._build_apps(), "hist": self._build_history(),
-                      "priv": self._build_privacy(), "keys": self._build_keys()}
+                      "priv": self._build_privacy(), "settings": self._build_settings(), "keys": self._build_keys()}
         for page in self.pages.values():
             root.addSubview_(page)
         self._select_tab("keys" if missing_secrets() else "home")
@@ -211,7 +216,10 @@ class AppDelegate(NSObject):
                 v.setHidden_(True)
                 side.addSubview_(v)
             self.timer_rows.append((name_view, time_view))
-        self.hint = label(HINTS[self.mode], NSMakeRect(20, 18, 180, 20), 11, NSColor.tertiaryLabelColor(), 0.0)
+        self.hint = NSTextField.wrappingLabelWithString_(HINTS[self.mode])
+        self.hint.setFrame_(NSMakeRect(20, 10, SIDEBAR - 36, 32))
+        self.hint.setFont_(NSFont.systemFontOfSize_(11))
+        self.hint.setTextColor_(NSColor.tertiaryLabelColor())
         side.addSubview_(self.hint)
 
     @objc.python_method
@@ -264,7 +272,7 @@ class AppDelegate(NSObject):
     def _build_home(self):
         page = self._page("Your Jev stats", "Everything since you started using Jev. Refreshes each time you open this tab.")
         self.stat_cards = []
-        card_w, card_h, gap = (PAGE_W - 48 - 32) / 3, 118, 16
+        card_w, card_h, gap = (PAGE_W - 48 - 32) / 3, 104, 16
         for i in range(6):
             x = 24 + (i % 3) * (card_w + gap)
             y = PAGE_H - 106 - card_h - (i // 3) * (card_h + gap)
@@ -274,19 +282,25 @@ class AppDelegate(NSObject):
             card.setCornerRadius_(12)
             card.setFillColor_(NSColor.quaternaryLabelColor().colorWithAlphaComponent_(0.12))
             page.addSubview_(card)
-            value = label("", NSMakeRect(x + 16, y + 58, card_w - 32, 40), 30, weight=0.6)
-            title = label("", NSMakeRect(x + 16, y + 34, card_w - 32, 20), 13, NSColor.labelColor(), 0.2)
-            sub = label("", NSMakeRect(x + 16, y + 14, card_w - 32, 18), 11, NSColor.secondaryLabelColor(), 0.0)
+            value = label("", NSMakeRect(x + 16, y + 52, card_w - 32, 40), 30, weight=0.6)
+            title = label("", NSMakeRect(x + 16, y + 30, card_w - 32, 20), 13, NSColor.labelColor(), 0.2)
+            sub = label("", NSMakeRect(x + 16, y + 12, card_w - 32, 18), 11, NSColor.secondaryLabelColor(), 0.0)
             for v in (value, title, sub):
                 page.addSubview_(v)
             self.stat_cards.append((value, title, sub))
-        top_y = PAGE_H - 106 - 2 * card_h - gap - 44
+        top_y = PAGE_H - 106 - 2 * card_h - gap - 40
         page.addSubview_(label("Most used", NSMakeRect(24, top_y, 200, 20), 14, weight=0.6))
         self.top_actions = NSTextField.wrappingLabelWithString_("")
-        self.top_actions.setFrame_(NSMakeRect(24, top_y - 46, PAGE_W - 48, 42))
+        self.top_actions.setFrame_(NSMakeRect(24, top_y - 40, PAGE_W - 48, 38))
         self.top_actions.setFont_(NSFont.systemFontOfSize_(13))
         self.top_actions.setTextColor_(NSColor.secondaryLabelColor())
         page.addSubview_(self.top_actions)
+        page.addSubview_(label("How to use", NSMakeRect(24, top_y - 70, 200, 20), 14, weight=0.6))
+        how = NSTextField.wrappingLabelWithString_(HOW_TO)
+        how.setFrame_(NSMakeRect(24, 10, PAGE_W - 48, top_y - 82))
+        how.setFont_(NSFont.systemFontOfSize_(13))
+        how.setTextColor_(NSColor.secondaryLabelColor())
+        page.addSubview_(how)
         return page
 
     @objc.python_method
@@ -420,6 +434,46 @@ class AppDelegate(NSObject):
         return page
 
     @objc.python_method
+    def _build_settings(self):
+        page = self._page("Settings", "Pick the microphone Jev listens with. It switches straight away.")
+        y = PAGE_H - 140
+        page.addSubview_(label("Microphone", NSMakeRect(24, y + 16, 160, 20), 14, weight=0.6))
+        page.addSubview_(label("Plugged in a new one? Restart Jev to see it here.", NSMakeRect(24, y - 2, 330, 18), 11,
+                               NSColor.secondaryLabelColor(), 0.0))
+        self.mic_menu = NSPopUpButton.alloc().initWithFrame_pullsDown_(NSMakeRect(360, y + 4, 306, 26), False)
+        self.mic_menu.setTarget_(self)
+        self.mic_menu.setAction_("micChanged:")
+        page.addSubview_(self.mic_menu)
+        self.mic_message = label("", NSMakeRect(24, y - 40, PAGE_W - 48, 20), 12, NSColor.secondaryLabelColor(), 0.0)
+        page.addSubview_(self.mic_message)
+        return page
+
+    @objc.python_method
+    def _load_mics(self):
+        try:
+            import sounddevice as sd
+            names = list(dict.fromkeys(d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0))
+            default = sd.query_devices(kind="input")["name"]
+        except Exception:
+            names, default = [], "none found"
+        self.mic_menu.removeAllItems()
+        self.mic_menu.addItemWithTitle_(f"System default ({default})")
+        self.mic_menu.addItemsWithTitles_(names)
+        if self.mic in names:
+            self.mic_menu.selectItemWithTitle_(self.mic)
+            self.mic_message.setStringValue_(f"Now using: {self.mic}")
+        else:
+            self.mic_menu.selectItemAtIndex_(0)
+            gone = f"{self.mic} isn’t plugged in, so " if self.mic else ""
+            self.mic_message.setStringValue_(f"{gone}Now using: {default}")
+
+    def micChanged_(self, sender):
+        self.mic = "" if sender.indexOfSelectedItem() == 0 else str(sender.titleOfSelectedItem())
+        NSUserDefaults.standardUserDefaults().setObject_forKey_(self.mic, "mic")
+        self.controls.put(("mic", self.mic))
+        self._load_mics()
+
+    @objc.python_method
     def _build_keys(self):
         page = self._page("Keys", "Saved in your Mac Keychain. A key in .env wins over these. Existing keys stay hidden.")
         self.key_fields = {}
@@ -447,6 +501,8 @@ class AppDelegate(NSObject):
             self._load_history()
         if key == "home":
             self._load_stats()
+        if key == "settings":
+            self._load_mics()
         for name, page in self.pages.items():
             page.setHidden_(name != key)
         for name, (box, tab) in self.tab_rows.items():
@@ -663,7 +719,7 @@ class AppDelegate(NSObject):
     def _run_assistant(self):
         from siri import run_voice_assistant
         try:
-            run_voice_assistant(self.notify, self.controls, self.mode)
+            run_voice_assistant(self.notify, self.controls, self.mode, self.mic)
         except Exception as exc:
             self.notify("Something went wrong", str(exc))
 

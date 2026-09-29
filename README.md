@@ -76,7 +76,7 @@ First launch:
 
 1. The window opens on the **Keys** tab. Paste your keys and hit Save keys, they're saved in your Mac Keychain. Change them any time in the same tab.
 2. Whisper downloads its `small.en` model (about 250MB), one time.
-3. macOS will ask for **Microphone** access. Say yes.
+3. macOS will ask for **Microphone** access. Say yes. To use a different mic, pick it in the **Settings** tab.
 4. Add "Hey Jev - Fish Audio" (or your terminal, if you run from the terminal) under **System Settings > Privacy & Security > Accessibility**, or key presses are ignored.
 5. The first time it quits an app or toggles dark mode you'll get an **Automation** prompt. Say yes.
 
@@ -152,7 +152,7 @@ Below 0.65 confidence it asks you to say it again, twice in a row and it gives u
 - `siri.py` all the logic: questions, actions, replies, Whisper, Fish, LLM fallback
 - `apps.json` the apps Jev can control
 - `dictation.py` and `bubble.py` dictation and its waveform bubble, `vocabulary.example.json` its word fixes (copy to `vocabulary.json`)
-- `assistant_ui.py` the window: status, mode switch, and the Home (stats), Dictionary, Apps, Dictation history, Privacy and Keys tabs
+- `assistant_ui.py` the window: status, mode switch, and the Home (stats), Dictionary, Apps, Dictation history, Privacy, Settings (microphone) and Keys tabs
 - `secrets_store.py` Keychain read / write
 - `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`
 - `assets/` the app icon
