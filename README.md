@@ -1,7 +1,6 @@
 # Hey Jev (Windows 10/11 x64 Port)
 
-> **Port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) to Windows 10/11 x64.**  
-> Original concept and macOS architecture by **Henryk Lunaris** (MIT License).  
+> Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by Bhagwat Panwar. Original by Henryk Lunaris (MIT).  
 >
 > **Referenced Projects, Credits & Licenses**:
 > - **Original Repository:** [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) — MIT License (Copyright © 2026 Henryk Lunaris)
@@ -215,7 +214,7 @@ python benchmark_backends.py --samples 50 --runs 2
 
 ## License & Credits
 
+- Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by Bhagwat Panwar. Original by Henryk Lunaris (MIT).
 - Original macOS implementation: Copyright © 2026 Henryk Lunaris ([MIT License](https://github.com/henryklunaris/hey-jev/blob/main/LICENSE)).
-- Windows 10/11 port and enhancements: MIT License.
 - Laya reference implementations: `hey-laya` (MIT License © 2026 Touhid Siddique Eraj) and `home-assistant-laya` (Apache 2.0 © 2026 Allen Porter).
 - openWakeWord: Apache 2.0 © 2023 David Scripka.

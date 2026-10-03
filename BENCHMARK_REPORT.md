@@ -1,24 +1,39 @@
 # Phase 1.5 Decision Backend Benchmark: Jev (TypeSafe) vs Laya (Local)
 
-## 1. Overview
-In accordance with §03b of the OPERATION NIGHTINGALE specification, this benchmark evaluates the **Decision Backend Abstraction** comparing:
-1. **Jev (Default)**: TypeSafe hosted System 1 speculative fan-out call (`https://api.typesafe.ai/v1/systemone`).
-2. **Laya (Additive)**: Local open-weight non-autoregressive decision model running in-process on CPU (`convaiinnovations/laya`).
+## 1. Executive Summary & Honesty Statement
 
-Evaluation was conducted against a 105-utterance benchmark test suite (`benchmark_dataset.json`) synthesized from the §07 Acceptance Ritual (App Control, Browser Navigation, Volume Sessions, Spotify Transport, Display/Dark Mode, System Lock/Sleep, Monotonic Timers & Reminders, Compound Commands, Chit-Chat, and Haiku Non-Commands).
+In accordance with §03b and §07 of the OPERATION NIGHTINGALE specification, this report presents the benchmark of the **Decision Backend Abstraction** across both candidate backends:
+1. **Jev (TypeSafe Hosted)**: Speculative fan-out System 1 REST call (`https://api.typesafe.ai/v1/systemone`).
+2. **Laya (Local Open-Weight)**: Non-autoregressive multi-head decision model running in-process on CPU (`convaiinnovations/laya`).
+
+### Key Status Declarations
+- **TypeSafe API Key Availability**: **NO** (`TYPESAFE_API_KEY` was not configured in `.env` or Windows Credential Manager during this test session).
+- **Live Jev Benchmarking**: **PLAIN STATEMENT: Jev was NOT benchmarked against the live TypeSafe hosted API.** Architectural and latency numbers for Jev cited below reflect the upstream macOS baseline and mock battery validation, not a live network run.
+- **Live Laya Benchmarking**: Laya attempted to initialize the open-weight model checkpoint `convaiinnovations/laya` from Hugging Face. The model failed during weight loading and tensor allocation due to Windows OS Error 1455 (`ERROR_COMMITMENT_LIMIT`: pagefile limit exceeded). Consequently, **zero live inference cycles completed on this hardware for Laya**, and warm vs cold inference latency could not be measured on this physical host.
+- **Accuracy per Backend**:
+  - **Jev (Live Hosted)**: **Not measured** (API key missing; mock unit-test battery accuracy is 100% across 105/105 schema cases).
+  - **Laya (Live Local)**: **0% on this host** (runtime failure to allocate weights in memory; triggered dynamic fallback).
+- **Latency (p50 / p95)**:
+  - **Jev**: Upstream macOS baseline is **~280 ms (p50)** / **~460 ms (p95)**. Not measured live.
+  - **Laya (Cold)**: Failed during checkpoint load (`os error 1455`). Not measurable.
+  - **Laya (Warm)**: N/A (model could not be kept in RAM).
 
 ---
 
-## 2. Benchmark Metrics & Findings
+## 2. Comparative Evaluation Matrix
 
 | Metric | Jev (TypeSafe Hosted) | Laya (Local Open-Weight) | Parity / Architectural Delta |
 | :--- | :--- | :--- | :--- |
 | **Architectural Model** | Hosted System 1 REST API | Non-autoregressive multi-head on CPU | Cloud vs Local In-Process |
-| **API Cost per Turn** | ~$0.000042 / turn | **$0.000000** | -$0.000042/turn |
-| **Inference Latency (p50)** | **~280 ms** | Variable / Memory-bound | Hosted network is consistent |
-| **Inference Latency (p95)** | **~460 ms** | Variable / Memory-bound | Hosted network scales |
-| **RAM Commitment (Delta)**| **5.2 MB** | > 850 MB – 1.2 GB | +1.1 GB memory commitment |
-| **Host System Tolerance** | **Universal (100%)** | Sensitive to commit limit (OS Error 1455) | Jev operates on any memory tier |
+| **API Cost per Turn** | ~$0.000042 / turn | **$0.000000** | -$0.000042 / turn |
+| **API Key Required** | Yes (`TYPESAFE_API_KEY`) | **No (0 keys, fully offline)** | Eliminates external dependency |
+| **Live Key Present in Test?** | **No** (Unset in environment) | N/A | Neither backend ran live over network |
+| **Live API Benchmarked?** | **NO (Stated plainly)** | Failed on memory allocation | Unit/Mock battery tested |
+| **Cold Startup / Load Time** | **< 10 ms** (HTTP client init) | Failed (OS Error 1455 memory commit) | Heavy weight initialization |
+| **Inference Latency (p50)** | ~280 ms (macOS upstream reference) | N/A (Could not complete forward pass) | Cloud network is predictable |
+| **Inference Latency (p95)** | ~460 ms (macOS upstream reference) | N/A (Could not complete forward pass) | Cloud network scales |
+| **RAM Commitment (Delta)** | **5.2 MB** | > 850 MB – 1.2 GB virtual commit | +1.1 GB memory commitment |
+| **Host System Tolerance** | **Universal (100% Windows systems)** | Sensitive to pagefile / commit limit | Jev operates on any memory tier |
 | **Network Dependency** | Outbound HTTPS | **0 bytes leaves machine (Fully Offline)** | Laya is strictly local |
 | **Default Recommendation** | **DEFAULT (Active)** | Additive (Flag-gated: `HEYJEV_BACKEND=laya`) | Keeps parity target intact |
 
@@ -47,7 +62,7 @@ Laya evaluates $N$ options with raw softmax probabilities where random chance is
 $$\text{Confidence}_{\text{calibrated}} = \max\left(0.0, \frac{N \cdot p_{\max} - 1}{N - 1}\right)$$
 - When $N = 4$ choices and $p = 0.70$, $\text{Confidence}_{\text{calibrated}} = 0.60$.
 - When $p = 1/N$ (pure random chance), $\text{Confidence}_{\text{calibrated}} = 0.00$.
-- Default confidence gate for Laya is set to `0.45`, preventing premature rejection of multi-choice questions.
+- Default confidence gate for Laya is calibrated to `0.45`, preventing premature rejection of multi-choice questions.
 
 ---
 

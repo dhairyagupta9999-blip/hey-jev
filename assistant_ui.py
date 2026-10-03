@@ -371,8 +371,7 @@ class MainWindow(QMainWindow):
         msg = (
             "<h3>Hey Jev (Windows 10/11 x64 Port)</h3>"
             "<p><b>Version:</b> 1.0 (Windows Port)</p>"
-            "<p><b>Original Concept & macOS Architecture:</b><br>"
-            "Port of <a href='https://github.com/henryklunaris/hey-jev'>henryklunaris/hey-jev</a> by Henryk Lunaris (MIT License).</p>"
+            "<p>Windows port of <a href='https://github.com/henryklunaris/hey-jev'>henryklunaris/hey-jev</a> by Bhagwat Panwar. Original by Henryk Lunaris (MIT).</p>"
             "<p><b>Decision Backends:</b><br>"
             "• TypeSafe Jev (Speculative fan-out System 1, default)<br>"
             "• Laya (Local open-weight System 1)</p>"
