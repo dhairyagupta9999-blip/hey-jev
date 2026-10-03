@@ -2,6 +2,13 @@
 
 All notable changes to the Windows 10/11 port of `hey-jev` will be documented in this file.
 
+## [Phase 4: Packaging & Distribution] - 2026-10-03
+- Created Windows PyInstaller specification (`hey_jev.spec`) building a standalone `--onedir --windowed` distribution with zero console flashing.
+- Implemented `autostart.py` supporting Windows Task Scheduler at-logon execution without requiring admin privileges, backed by HKCU Run fallback.
+- Added Settings toggle for Windows startup and integrated system tray minimizing behavior.
+- Generated multi-resolution Windows executable icon (`assets/icon.ico`) from `assets/icon.png`.
+- Verified clean cold start of packaged distribution (`dist/Hey Jev/Hey Jev.exe`).
+
 ## [Phase 3: Window & Bubble] - 2026-10-03
 - Rebuilt assistant UI tab-for-tab in PySide6 with Windows 11 dark slate aesthetics, 14px anti-aliased status dot, and segmented mode switch.
 - Implemented frameless, topmost, click-through, per-monitor DPI aware dictation bubble (`bubble.py`) with 24-bar live RMS animated waveform.

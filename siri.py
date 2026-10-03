@@ -586,7 +586,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", help="skip the mic, run one turn on this transcript")
     ap.add_argument("--wake", action="store_true", help="always listening, say \"Hey Jev\" instead of holding Alt")
+    ap.add_argument("--ui", action="store_true", help="launch graphical interface")
     args = ap.parse_args()
+
+    if args.ui:
+        from assistant_ui import run_app
+        run_app()
+        return
 
     if not TS_KEY or not FISH_KEY:
         print("Note: TYPESAFE_API_KEY and FISH_AUDIO_API_KEY should be set in .env or Windows Credential Manager.")

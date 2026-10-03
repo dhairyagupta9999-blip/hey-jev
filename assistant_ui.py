@@ -620,6 +620,12 @@ class MainWindow(QMainWindow):
         self.chk_tray.toggled.connect(self._on_tray_toggled)
         win_lay.addWidget(self.chk_tray)
 
+        from autostart import is_autostart_enabled
+        self.chk_autostart = QCheckBox("Launch Hey Jev at Windows startup (at logon)")
+        self.chk_autostart.setChecked(is_autostart_enabled())
+        self.chk_autostart.toggled.connect(self._on_autostart_toggled)
+        win_lay.addWidget(self.chk_autostart)
+
         lay.addWidget(win_group)
         lay.addStretch()
         return w
@@ -652,6 +658,15 @@ class MainWindow(QMainWindow):
 
     def _on_tray_toggled(self, checked: bool):
         self.settings["close_to_tray"] = checked
+        save_settings(self.settings)
+
+    def _on_autostart_toggled(self, checked: bool):
+        from autostart import enable_autostart, disable_autostart
+        if checked:
+            ok, msg = enable_autostart()
+        else:
+            ok, msg = disable_autostart()
+        self.settings["autostart"] = checked
         save_settings(self.settings)
 
     # ---------------- Tab 7: Keys ----------------
