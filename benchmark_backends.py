@@ -282,20 +282,42 @@ def main():
 def generate_report(results: Dict[str, Any]) -> str:
     j = results.get("jev", {})
     l = results.get("laya", {})
+
+    def _fmt(val, unit=""):
+        if val in ("N/A", None):
+            return "N/A"
+        if isinstance(val, (int, float)):
+            return f"{val}{unit}"
+        return f"{val}"
+
+    j_cost = j.get('avg_cost_per_turn_usd', 0.0)
+    l_cost = l.get('avg_cost_per_turn_usd', 0.0)
+    if isinstance(j_cost, (int, float)) and isinstance(l_cost, (int, float)):
+        diff = l_cost - j_cost
+        cost_delta_str = f"-${abs(diff):.6f}/turn" if diff < 0 else (f"+${diff:.6f}/turn" if diff > 0 else "$0.000000/turn")
+        cost_j_str = f"${j_cost:.6f}"
+        cost_l_str = f"${l_cost:.6f}"
+    else:
+        cost_delta_str = "N/A"
+        cost_j_str = str(j_cost)
+        cost_l_str = str(l_cost)
+
     lines = [
         "# Phase 1.5 Decision Backend Benchmark: Jev (TypeSafe) vs Laya (Local)",
+        "",
+        "Test phrases were written by the agent, not recorded from real speech.",
         "",
         "## Summary of Results",
         "",
         "| Metric | Jev (TypeSafe Hosted) | Laya (Local Open-Weight) | Parity / Delta |",
         "| :--- | :--- | :--- | :--- |",
-        f"| **Overall Accuracy** | {j.get('overall_accuracy_pct', 'N/A')} | {l.get('overall_accuracy_pct', 'N/A')} | N/A |",
-        f"| **Category Accuracy** | {j.get('accuracy_category_pct', 'N/A')} | {l.get('accuracy_category_pct', 'N/A')} | N/A |",
-        f"| **Compound Detection** | {j.get('accuracy_compound_pct', 'N/A')} | {l.get('accuracy_compound_pct', 'N/A')} | N/A |",
-        f"| **Latency p50** | {j.get('latency_p50_ms', 'N/A')} | {l.get('latency_p50_ms', 'N/A')} | N/A |",
-        f"| **Latency p95** | {j.get('latency_p95_ms', 'N/A')} | {l.get('latency_p95_ms', 'N/A')} | N/A |",
-        f"| **RAM Footprint (Delta)** | {j.get('ram_delta_mb', 'N/A')} | {l.get('ram_delta_mb', 'N/A')} | N/A |",
-        f"| **Cost per Turn** | ${j.get('avg_cost_per_turn_usd', 0.000042):.6f} | ${l.get('avg_cost_per_turn_usd', 0.0):.6f} | -$0.000042/turn |",
+        f"| **Overall Accuracy** | {_fmt(j.get('overall_accuracy_pct'), '%')} | {_fmt(l.get('overall_accuracy_pct'), '%')} | N/A |",
+        f"| **Category Accuracy** | {_fmt(j.get('accuracy_category_pct'), '%')} | {_fmt(l.get('accuracy_category_pct'), '%')} | N/A |",
+        f"| **Compound Detection** | {_fmt(j.get('accuracy_compound_pct'), '%')} | {_fmt(l.get('accuracy_compound_pct'), '%')} | N/A |",
+        f"| **Latency p50** | {_fmt(j.get('latency_p50_ms'), ' ms')} | {_fmt(l.get('latency_p50_ms'), ' ms')} | N/A |",
+        f"| **Latency p95** | {_fmt(j.get('latency_p95_ms'), ' ms')} | {_fmt(l.get('latency_p95_ms'), ' ms')} | N/A |",
+        f"| **RAM Footprint (Delta)** | {_fmt(j.get('ram_delta_mb'), ' MB')} | not measured | N/A |",
+        f"| **Cost per Turn** | {cost_j_str} | {cost_l_str} | {cost_delta_str} |",
         "",
         "## Analysis & Recommendation",
         "- **Decision Default**: Kept as **Jev** (`TYPESAFE_API_KEY`) as mandated by the prime directives and Phase 0 summary until calibrated.",

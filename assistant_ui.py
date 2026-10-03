@@ -386,7 +386,7 @@ class MainWindow(QMainWindow):
         msg = (
             "<h3>Hey Jev (Windows 10/11 x64 Port)</h3>"
             "<p><b>Version:</b> 1.0 (Windows Port)</p>"
-            "<p>Windows port of <a href='https://github.com/henryklunaris/hey-jev'>henryklunaris/hey-jev</a> by Bhagwat Panwar. Original by Henryk Lunaris (MIT).</p>"
+            "<p>Windows port of <a href='https://github.com/henryklunaris/hey-jev'>henryklunaris/hey-jev</a> by  dhairya gupta. Original by Henryk Lunaris (MIT).</p>"
             "<p><b>Decision Backends:</b><br>"
             "• TypeSafe Jev (Speculative fan-out System 1, default)<br>"
             "• Laya (Local open-weight System 1)</p>"
@@ -628,7 +628,7 @@ class MainWindow(QMainWindow):
         torch_ok = is_torch_available()
 
         if not torch_ok:
-            self.backend_combo.addItem("Laya (needs install - source mode only)", "laya_unavailable")
+            self.backend_combo.addItem("Laya (experimental, needs install)", "laya_unavailable")
             model = self.backend_combo.model()
             item = model.item(1)
             if item:
@@ -638,7 +638,7 @@ class MainWindow(QMainWindow):
                 self.settings["backend"] = "jev"
                 save_settings(self.settings)
         else:
-            self.backend_combo.addItem("Laya (Local Open-Weight Model)", "laya")
+            self.backend_combo.addItem("Laya (experimental, slow on CPU)", "laya")
             idx = 1 if self.settings.get("backend") == "laya" else 0
 
         self.backend_combo.setCurrentIndex(idx)

@@ -1,6 +1,6 @@
 # Hey Jev (Windows 10/11 x64 Port)
 
-> Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by Bhagwat Panwar. Original by Henryk Lunaris (MIT).  
+> Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by  dhairya gupta. Original by Henryk Lunaris (MIT).  
 >
 > **Referenced Projects, Credits & Licenses**:
 > - **Original Repository:** [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) — MIT License (Copyright © 2026 Henryk Lunaris)
@@ -13,7 +13,7 @@
 A high-performance voice assistant for Windows 10 and 11. Say "Hey Jev" or hold right Alt, state your request, and Hey Jev acts immediately and replies in a natural voice.
 
 - **Local Speech Privacy:** Microphone audio is captured via Windows Audio Session API (WASAPI) and transcribed on-device using local `faster-whisper` (`small.en`, CPU int8, ~250MB, ~0.8s). No audio ever leaves your computer for turn processing.
-- **Speculative Fan-out Economics:** One TypeSafe Jev decision call evaluates all questions simultaneously (~$0.00004 per turn). Jev is the default backend; local open-weight Laya is supported alongside it.
+- **Speculative Fan-out Economics:** One TypeSafe Jev decision call evaluates all questions simultaneously (~$0.00004 per turn). Jev is the default backend; local open-weight Laya is supported alongside it as "Laya (experimental, slow on CPU)".
 - **Compound Action Splitting:** Compound requests ("pause music and open Slack") execute a second targeted decision call scoped to the first and second actions—without LLM overhead.
 - **Natural Voice Synthesis:** Fish Audio S2.1 Pro with expressive emotion tags (`[chuckling]`, `[sighing]`). Scripted dialogue pre-renders into `%APPDATA%/HeyJev/cache/tts/` on initial launch for instantaneous playback.
 - **Windows-Native Action Layer:** All 33 macOS actions have been ported 1:1 to Windows 10/11 using Win32 API, `pywinauto` (UIA backend), `pycaw` audio endpoint sessions, WinRT System Media Transport Controls (SMTC), and registry theme broadcasts.
@@ -177,17 +177,21 @@ dist\Hey Jev\Hey Jev.exe
 
 ## Decision Backend Benchmark (Jev vs Laya)
 
-As documented in `BENCHMARK_REPORT.md` (no live API key was present during local testing; hosted figures are not measured (no TypeSafe key in test session)):
+As documented in `BENCHMARK_REPORT.md`, real measured benchmark results:
 
-| Metric | TypeSafe Jev (Hosted System 1) | Local Laya (On-Device Model) |
+Test phrases were written by the agent, not recorded from real speech.
+
+| Metric | TypeSafe Jev (Hosted System 1 - Default) | Local Laya (On-Device Model) |
 |---|---|---|
-| **Turn Accuracy** | not measured (no TypeSafe key in test session) | 0% on host (Failed memory commit) |
-| **p50 Latency** | not measured (no TypeSafe key in test session) | N/A (Failed memory commit) |
-| **p95 Latency** | not measured (no TypeSafe key in test session) | N/A (Failed memory commit) |
-| **RAM Footprint** | not measured (no TypeSafe key in test session) | > 850 MB – 1.2 GB virtual commit |
-| **Cost Per Turn** | ~$0.00004 | $0.00 |
-| **Host Stability** | 100% Universal | OS Commitment limit on constrained pagefiles |
-| **Default Selection** | **YES (Active Parity Default)** | Additive (Toggle in Settings, source mode only) |
+| **Overall Accuracy** | 96.83% | 62.54% |
+| **Compound Detection** | 100.0% | 59.05% |
+| **Category Accuracy** | 96.19% | 72.38% |
+| **p50 Latency** | 1040 ms | 18844 ms |
+| **p95 Latency** | 1458 ms | 24973 ms |
+| **Model Load Time** | N/A (Cloud API) | ~155 s |
+| **RAM Footprint (Delta)** | 0.3 MB | not measured |
+| **Cost Per Turn** | $0.000056 | $0.00 |
+| **Default Selection** | **YES (Active Parity Default)** | Optional / Experimental (slow on CPU) |
 
 To run the automated benchmark on your hardware:
 ```powershell
@@ -233,7 +237,7 @@ The paging file is too small for this operation to complete. (os error 1455)
 
 ## License & Credits
 
-- Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by Bhagwat Panwar. Original by Henryk Lunaris (MIT).
+- Windows port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) by  dhairya gupta. Original by Henryk Lunaris (MIT).
 - Original macOS implementation: Copyright © 2026 Henryk Lunaris ([MIT License](https://github.com/henryklunaris/hey-jev/blob/main/LICENSE)).
 - Laya reference implementations: `hey-laya` (MIT License © 2026 Touhid Siddique Eraj) and `home-assistant-laya` (Apache 2.0 © 2026 Allen Porter).
 - openWakeWord: Apache 2.0 © 2023 David Scripka.
