@@ -177,22 +177,41 @@ dist\Hey Jev\Hey Jev.exe
 
 ## Decision Backend Benchmark (Jev vs Laya)
 
-As evaluated in `BENCHMARK_REPORT.md`:
+As documented in `BENCHMARK_REPORT.md` (no live API key was present during local testing; hosted figures are unmeasured estimates from upstream reference):
 
 | Metric | TypeSafe Jev (Hosted System 1) | Local Laya (On-Device Model) |
 |---|---|---|
-| **Turn Accuracy** | 98.1% | 84.8% |
-| **p50 Latency** | 224 ms | 712 ms (CPU) |
-| **p95 Latency** | 382 ms | 1,480 ms (CPU) |
-| **RAM Footprint** | ~140 MB | ~1.85 GB |
+| **Turn Accuracy** | Unmeasured (100% on mock battery) | 0% on host (Failed memory commit) |
+| **p50 Latency** | Unmeasured estimate (~280 ms macOS upstream) | N/A (Failed memory commit) |
+| **p95 Latency** | Unmeasured estimate (~460 ms macOS upstream) | N/A (Failed memory commit) |
+| **RAM Footprint** | Unmeasured estimate (~5.2 MB macOS upstream) | > 850 MB – 1.2 GB virtual commit |
 | **Cost Per Turn** | ~$0.00004 | $0.00 |
-| **Host Stability** | 100% Green | OS Commitment limit on constrained pagefiles |
-| **Default Selection** | **YES (Recommended Default)** | Additive (Toggle in Settings) |
+| **Host Stability** | 100% Universal | OS Commitment limit on constrained pagefiles |
+| **Default Selection** | **YES (Active Parity Default)** | Additive (Toggle in Settings, source mode only) |
 
 To run the automated benchmark on your hardware:
 ```powershell
 python benchmark_backends.py --samples 50 --runs 2
 ```
+
+---
+
+## Troubleshooting & Common Issues
+
+### Laya: Windows OS Error 1455 (`ERROR_COMMITMENT_LIMIT`)
+When loading the local Laya decision model (`convaiinnovations/laya`) on CPU, PyTorch allocates contiguous virtual memory for model tensor weights. On systems with constrained or fixed paging file sizes, Windows may raise:
+```
+The paging file is too small for this operation to complete. (os error 1455)
+```
+**Resolution Steps:**
+1. **Increase or System-Manage the Windows Paging File**:
+   - Press `Win + R`, type `sysdm.cpl`, and press Enter.
+   - Go to the **Advanced** tab -> **Performance** -> click **Settings...** -> **Advanced** tab.
+   - Under **Virtual memory**, click **Change...**.
+   - Check **"Automatically manage paging file size for all drives"** (or configure a custom size with at least 8192 MB initial and maximum size).
+   - Click **Set**, then **OK**, and restart your PC.
+2. **Free Physical RAM**: Close memory-heavy applications (e.g. IDEs, multiple browser tabs) before initializing Laya.
+3. **Use Default Jev Backend**: TypeSafe Jev (`HEYJEV_BACKEND=jev`) is the default backend and runs with minimal memory footprint without requiring PyTorch tensor allocations.
 
 ---
 

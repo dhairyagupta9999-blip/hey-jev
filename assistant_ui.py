@@ -12,7 +12,7 @@ import threading
 from typing import Dict, Any, List
 
 from PySide6.QtCore import Qt, QTimer, Signal, QObject, QSize
-from PySide6.QtGui import QIcon, QColor, QFont, QPalette, QAction, QPainter, QPixmap
+from PySide6.QtGui import QIcon, QColor, QFont, QPalette, QAction, QPainter, QPixmap, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTabWidget, QLineEdit, QComboBox, QCheckBox,
@@ -96,6 +96,15 @@ class StatusDot(QWidget):
         painter.end()
 
 
+def is_torch_available() -> bool:
+    """Check if PyTorch is available in current runtime environment."""
+    try:
+        import torch  # noqa: F401
+        return True
+    except (ImportError, Exception):
+        return False
+
+
 class MainWindow(QMainWindow):
     """Primary 7-tab Hey Jev desktop window."""
 
@@ -106,7 +115,7 @@ class MainWindow(QMainWindow):
         self.controls_queue = queue.Queue()
         self.worker_thread = None
 
-        self.setWindowTitle("Hey Jev - Fish Audio")
+        self.setWindowTitle("Hey Jev")
         self.setMinimumSize(480, 520)
         self.resize(500, 560)
 
@@ -123,6 +132,19 @@ class MainWindow(QMainWindow):
         self._apply_dark_theme()
         self._init_ui()
         self._init_tray()
+
+        # Window-level Ctrl+Q shortcut
+        self.quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.quit_shortcut.activated.connect(self._quit_application)
+
+        # Register global OS-level Ctrl+Q hotkey on Windows
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                # 0x0002 = MOD_CONTROL, 0x51 = 'Q'
+                ctypes.windll.user32.RegisterHotKey(int(self.winId()), 101, 0x0002, 0x51)
+            except Exception:
+                pass
 
         # Timer countdown tick
         self.tick_timer = QTimer(self)
@@ -347,6 +369,7 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut("Ctrl+Q")
         quit_action.triggered.connect(self._quit_application)
         tray_menu.addAction(quit_action)
+        self.addAction(quit_action)
 
         self.tray.setContextMenu(tray_menu)
         self.tray.activated.connect(self._on_tray_activated)
@@ -560,7 +583,10 @@ class MainWindow(QMainWindow):
 
     def _update_privacy_text(self):
         backend = self.settings.get("backend", "jev")
-        if backend == "laya":
+        torch_ok = is_torch_available()
+        laya_actually_active = (backend == "laya" and torch_ok)
+
+        if laya_actually_active:
             msg = (
                 "<b>Active Backend: Local Laya (100% On-Device)</b><br><br>"
                 "• <b>Audio Capture & Speech Recognition:</b> All audio stays 100% on your device, "
@@ -570,6 +596,16 @@ class MainWindow(QMainWindow):
                 "• <b>Dictation:</b> Dictation is the ONLY feature that contacts a cloud endpoint "
                 "(OpenRouter/OpenAI), only when you explicitly say 'Hey Jev, transcribe'.<br>"
                 "• <b>Custom Vocabulary:</b> Your personal dictionary and timers remain gitignored on your machine."
+            )
+        elif backend == "laya" and not torch_ok:
+            msg = (
+                "<b>Active Backend: Jev (Fallback - Local Laya Unavailable)</b><br><br>"
+                "• <b>Notice:</b> Laya requires PyTorch, which is not bundled in this build (source mode only).<br>"
+                "• <b>Decision Routing:</b> Command decisions route to TypeSafe Jev System 1 (~$0.00004 per turn). "
+                "<b>Decisions are NOT evaluated on-device because Laya is inactive.</b><br>"
+                "• <b>Local Audio Privacy:</b> Raw microphone audio NEVER leaves your machine. "
+                "faster-whisper converts speech to text locally on your CPU.<br>"
+                "• <b>Dictation:</b> Dictation audio is sent only when explicitly requested."
             )
         else:
             msg = (
@@ -597,8 +633,22 @@ class MainWindow(QMainWindow):
 
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Jev (TypeSafe System 1 - Default)", "jev")
-        self.backend_combo.addItem("Laya (Local Open-Weight Model)", "laya")
-        idx = 1 if self.settings.get("backend") == "laya" else 0
+        torch_ok = is_torch_available()
+
+        if not torch_ok:
+            self.backend_combo.addItem("Laya (needs install - source mode only)", "laya_unavailable")
+            model = self.backend_combo.model()
+            item = model.item(1)
+            if item:
+                item.setEnabled(False)
+            idx = 0
+            if self.settings.get("backend") == "laya":
+                self.settings["backend"] = "jev"
+                save_settings(self.settings)
+        else:
+            self.backend_combo.addItem("Laya (Local Open-Weight Model)", "laya")
+            idx = 1 if self.settings.get("backend") == "laya" else 0
+
         self.backend_combo.setCurrentIndex(idx)
         self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
         bg_lay.addRow("Backend:", self.backend_combo)
@@ -651,6 +701,10 @@ class MainWindow(QMainWindow):
 
     def _on_backend_changed(self, idx: int):
         val = self.backend_combo.itemData(idx)
+        if val == "laya_unavailable":
+            # Revert selection to Jev if unavailable
+            self.backend_combo.setCurrentIndex(0)
+            return
         self.settings["backend"] = val
         os.environ["HEYJEV_BACKEND"] = val
         self.gate_spin.setValue(self.settings.get("gate_laya" if val == "laya" else "gate_jev", 0.65 if val == "jev" else 0.45))
@@ -838,7 +892,32 @@ class MainWindow(QMainWindow):
         else:
             self._quit_application()
 
+    def nativeEvent(self, event_type, message):
+        """Handle native Windows events including OS-level hotkeys (Ctrl+Q) and tray messages."""
+        if sys.platform == "win32" and event_type == b"windows_generic_MSG":
+            try:
+                import ctypes
+                import ctypes.wintypes
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                # 0x0312 is WM_HOTKEY, wParam 101 is Ctrl+Q
+                if msg.message == 0x0312 and msg.wParam == 101:
+                    self._quit_application()
+                    return True, 0
+                # 0x0111 is WM_COMMAND (standard Win32 menu / accelerator / tray quit)
+                if msg.message == 0x0111:
+                    self._quit_application()
+                    return True, 0
+            except Exception:
+                pass
+        return super().nativeEvent(event_type, message)
+
     def _quit_application(self):
+        try:
+            if sys.platform == "win32":
+                import ctypes
+                ctypes.windll.user32.UnregisterHotKey(int(self.winId()), 101)
+        except Exception:
+            pass
         self.bubble.close()
         QApplication.quit()
 

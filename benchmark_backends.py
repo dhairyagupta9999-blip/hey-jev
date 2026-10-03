@@ -248,11 +248,11 @@ def main():
         print(f"[warning] Jev benchmark skipped or failed: {e}")
         results["jev"] = {
             "backend": "jev",
-            "note": "Skipped due to API credentials or network",
-            "overall_accuracy_pct": 96.8,
-            "latency_p50_ms": 280.0,
-            "latency_p95_ms": 460.0,
-            "ram_delta_mb": 5.2,
+            "note": "Skipped live execution due to unconfigured API key; figures are unmeasured estimates from macOS upstream reference",
+            "overall_accuracy_pct": "unmeasured",
+            "latency_p50_ms": "unmeasured estimate (~280.0 ms macOS upstream)",
+            "latency_p95_ms": "unmeasured estimate (~460.0 ms macOS upstream)",
+            "ram_delta_mb": "unmeasured estimate (~5.2 MB macOS upstream)",
             "avg_cost_per_turn_usd": 0.000042
         }
 

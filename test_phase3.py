@@ -42,6 +42,7 @@ class TestPhase3WindowAndBubble(unittest.TestCase):
         tab_titles = [window.tabs.tabText(i) for i in range(window.tabs.count())]
         expected_tabs = ["Home", "Dictionary", "Apps", "Dictation", "Privacy", "Settings", "Keys"]
         self.assertEqual(tab_titles, expected_tabs)
+        self.assertEqual(window.windowTitle(), "Hey Jev")
 
         window.close()
 
@@ -54,21 +55,46 @@ class TestPhase3WindowAndBubble(unittest.TestCase):
         self.assertEqual(STATUS_COLORS["Speaking"], "#06b6d4")     # Teal
 
     def test_dynamic_privacy_text(self):
-        """Verify privacy text changes dynamically based on active backend."""
+        """Verify privacy text changes dynamically based on active backend and torch availability."""
+        from unittest.mock import patch
         window = MainWindow()
+
         # Test Jev text
         window.settings["backend"] = "jev"
         window._update_privacy_text()
         self.assertIn("Jev (TypeSafe Hosted", window.privacy_text.text())
         self.assertIn("faster-whisper", window.privacy_text.text())
 
-        # Test Laya text
-        window.settings["backend"] = "laya"
-        window._update_privacy_text()
-        self.assertIn("Local Laya (100% On-Device)", window.privacy_text.text())
-        self.assertIn("Zero command text or audio leaves your computer", window.privacy_text.text())
+        # Test Laya text when torch IS available
+        with patch("assistant_ui.is_torch_available", return_value=True):
+            window.settings["backend"] = "laya"
+            window._update_privacy_text()
+            self.assertIn("Local Laya (100% On-Device)", window.privacy_text.text())
+            self.assertIn("Zero command text or audio leaves your computer", window.privacy_text.text())
+
+        # Test Laya text when torch is NOT bundled/available (honest packaged mode)
+        with patch("assistant_ui.is_torch_available", return_value=False):
+            window.settings["backend"] = "laya"
+            window._update_privacy_text()
+            self.assertNotIn("Local Laya (100% On-Device)", window.privacy_text.text())
+            self.assertIn("Fallback - Local Laya Unavailable", window.privacy_text.text())
+            self.assertIn("NOT evaluated on-device", window.privacy_text.text())
 
         window.close()
+
+    def test_honest_laya_dropdown(self):
+        """Verify settings dropdown marks Laya as unselectable when torch is not bundled."""
+        from unittest.mock import patch
+        # When torch is unavailable
+        with patch("assistant_ui.is_torch_available", return_value=False):
+            window = MainWindow()
+            # Item 1 should indicate needs install
+            self.assertIn("needs install", window.backend_combo.itemText(1))
+            self.assertEqual(window.backend_combo.itemData(1), "laya_unavailable")
+            # Should be unselectable (index forced to 0)
+            window.backend_combo.setCurrentIndex(1)
+            self.assertEqual(window.backend_combo.currentIndex(), 0)
+            window.close()
 
     def test_close_to_tray_semantics(self):
         """Verify Close hides window rather than terminating process."""

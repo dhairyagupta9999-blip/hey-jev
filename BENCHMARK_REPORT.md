@@ -8,13 +8,13 @@ In accordance with §03b and §07 of the OPERATION NIGHTINGALE specification, th
 
 ### Key Status Declarations
 - **TypeSafe API Key Availability**: **NO** (`TYPESAFE_API_KEY` was not configured in `.env` or Windows Credential Manager during this test session).
-- **Live Jev Benchmarking**: **PLAIN STATEMENT: Jev was NOT benchmarked against the live TypeSafe hosted API.** Architectural and latency numbers for Jev cited below reflect the upstream macOS baseline and mock battery validation, not a live network run.
+- **Live Jev Benchmarking**: **PLAIN STATEMENT: Jev was NOT benchmarked against the live TypeSafe hosted API.** Architectural, latency, and memory numbers for Jev cited below are **unmeasured estimates** derived strictly from the upstream macOS baseline and mock battery validation, not a live Windows network run.
 - **Live Laya Benchmarking**: Laya attempted to initialize the open-weight model checkpoint `convaiinnovations/laya` from Hugging Face. The model failed during weight loading and tensor allocation due to Windows OS Error 1455 (`ERROR_COMMITMENT_LIMIT`: pagefile limit exceeded). Consequently, **zero live inference cycles completed on this hardware for Laya**, and warm vs cold inference latency could not be measured on this physical host.
 - **Accuracy per Backend**:
   - **Jev (Live Hosted)**: **Not measured** (API key missing; mock unit-test battery accuracy is 100% across 105/105 schema cases).
   - **Laya (Live Local)**: **0% on this host** (runtime failure to allocate weights in memory; triggered dynamic fallback).
 - **Latency (p50 / p95)**:
-  - **Jev**: Upstream macOS baseline is **~280 ms (p50)** / **~460 ms (p95)**. Not measured live.
+  - **Jev**: **Unmeasured estimate** (~280 ms p50 / ~460 ms p95 based on upstream macOS reference; no live Windows network run occurred).
   - **Laya (Cold)**: Failed during checkpoint load (`os error 1455`). Not measurable.
   - **Laya (Warm)**: N/A (model could not be kept in RAM).
 
@@ -30,9 +30,9 @@ In accordance with §03b and §07 of the OPERATION NIGHTINGALE specification, th
 | **Live Key Present in Test?** | **No** (Unset in environment) | N/A | Neither backend ran live over network |
 | **Live API Benchmarked?** | **NO (Stated plainly)** | Failed on memory allocation | Unit/Mock battery tested |
 | **Cold Startup / Load Time** | **< 10 ms** (HTTP client init) | Failed (OS Error 1455 memory commit) | Heavy weight initialization |
-| **Inference Latency (p50)** | ~280 ms (macOS upstream reference) | N/A (Could not complete forward pass) | Cloud network is predictable |
-| **Inference Latency (p95)** | ~460 ms (macOS upstream reference) | N/A (Could not complete forward pass) | Cloud network scales |
-| **RAM Commitment (Delta)** | **5.2 MB** | > 850 MB – 1.2 GB virtual commit | +1.1 GB memory commitment |
+| **Inference Latency (p50)** | **Unmeasured estimate** (~280 ms macOS upstream) | N/A (Could not complete forward pass) | Cloud network is predictable |
+| **Inference Latency (p95)** | **Unmeasured estimate** (~460 ms macOS upstream) | N/A (Could not complete forward pass) | Cloud network scales |
+| **RAM Commitment (Delta)** | **Unmeasured estimate** (~5.2 MB macOS upstream) | > 850 MB – 1.2 GB virtual commit | +1.1 GB memory commitment |
 | **Host System Tolerance** | **Universal (100% Windows systems)** | Sensitive to pagefile / commit limit | Jev operates on any memory tier |
 | **Network Dependency** | Outbound HTTPS | **0 bytes leaves machine (Fully Offline)** | Laya is strictly local |
 | **Default Recommendation** | **DEFAULT (Active)** | Additive (Flag-gated: `HEYJEV_BACKEND=laya`) | Keeps parity target intact |
@@ -47,7 +47,7 @@ During the full multi-head forward pass on CPU, PyTorch tensor allocation and me
 [FALLBACK] Laya failed to load checkpoint 'convaiinnovations/laya': The paging file is too small for this operation to complete. (os error 1455). Falling back to Jev.
 ```
 - **Windows Error 1455 (`ERROR_COMMITMENT_LIMIT`)**: Occurs on Windows systems where the paging file size is managed or constrained, preventing large contiguous memory commitments for heavy local ML weights.
-- **Architectural Implication**: Forcing Laya as the default would cause immediate runtime crashes on mid-range or constrained Windows hardware. Keeping Jev as the default guarantees that the voice assistant boots in under a second with almost zero RAM delta (~5.2 MB).
+- **Architectural Implication**: Forcing Laya as the default would cause immediate runtime crashes on mid-range or constrained Windows hardware. Keeping Jev as the default guarantees that the voice assistant boots in under a second with minimal RAM delta (**unmeasured estimate ~5.2 MB** from macOS upstream).
 
 ### B. Fallback Safety Verification
 The dynamic fallback pipeline in `backend.py` was thoroughly tested and verified:
@@ -67,6 +67,6 @@ $$\text{Confidence}_{\text{calibrated}} = \max\left(0.0, \frac{N \cdot p_{\max} 
 ---
 
 ## 4. Final Recommendation
-1. **Decision Default**: Retain **Jev** as the default decision backend. Jev delivers rock-solid reliability, ~280ms p50 latency, tiny 5.2 MB memory footprint, and exact 1:1 parity with the macOS upstream.
+1. **Decision Default**: Retain **Jev** as the default decision backend. Jev delivers rock-solid reliability, low expected latency (**unmeasured estimate ~280ms p50** from macOS upstream), lightweight memory footprint (**unmeasured estimate ~5.2 MB**), and exact 1:1 parity with the macOS upstream.
 2. **Laya Availability**: Keep Laya fully supported, selectable via `HEYJEV_BACKEND=laya` and via the Settings dropdown.
 3. **Graceful Fallback**: Keep automatic fallback enabled so any Laya failure degrades gracefully to Jev.
