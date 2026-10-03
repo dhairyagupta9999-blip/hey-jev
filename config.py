@@ -12,6 +12,7 @@ os.makedirs(APPDATA_DIR, exist_ok=True)
 # Standard file locations
 LOG_FILE = os.path.join(APPDATA_DIR, "Hey Jev.log")
 DICTATION_HISTORY_FILE = os.path.join(APPDATA_DIR, "Hey Jev dictation.jsonl")
+DICTATION_LOG = DICTATION_HISTORY_FILE
 DICTATION_FAILED_DIR = os.path.join(APPDATA_DIR, "dictation_failed")
 TTS_CACHE_DIR = os.path.join(APPDATA_DIR, "cache", "tts")
 CLIPS_DIR = os.path.join(APPDATA_DIR, "clips")

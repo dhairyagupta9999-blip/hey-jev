@@ -2,6 +2,13 @@
 
 All notable changes to the Windows 10/11 port of `hey-jev` will be documented in this file.
 
+## [Phase 3: Window & Bubble] - 2026-10-03
+- Rebuilt assistant UI tab-for-tab in PySide6 with Windows 11 dark slate aesthetics, 14px anti-aliased status dot, and segmented mode switch.
+- Implemented frameless, topmost, click-through, per-monitor DPI aware dictation bubble (`bubble.py`) with 24-bar live RMS animated waveform.
+- Added live 500ms countdown timers, dictionary editor for `%APPDATA%/HeyJev/vocabulary.json`, apps table, dictation history log viewer, and Windows Credential Manager key management.
+- Dynamic privacy contract display updating according to active decision backend (Jev vs Laya).
+- Window close interception preserving listening loop with hide-to-tray semantics.
+
 ## [Phase 2: Action Parity] - 2026-10-03
 - Implemented and verified all 33 actions from the Action Parity Table for Windows 10/11 x64.
 - Added comprehensive app launcher supporting Win32, UWP, and packaged apps via URI schemes and shell:AppsFolder.
