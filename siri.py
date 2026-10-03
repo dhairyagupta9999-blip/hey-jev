@@ -121,29 +121,13 @@ def split_questions():
 
 SPLIT_QUESTIONS = split_questions()
 
+from backend import DecisionBackend, JevBackend, LayaBackend, get_backend
+
 # --------------------------------------------------------------------------- Decision Layer
 def jev(text, questions=None):
-    """Call TypeSafe hosted Jev API (v1/systemone)."""
-    t0 = time.time()
-    resp = requests.post(
-        "https://api.typesafe.ai/v1/systemone",
-        json={"model": "jev-latest", "state": text, "questions": questions or QUESTIONS},
-        headers={"Authorization": f"Bearer {TS_KEY}"},
-        timeout=30
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    ans = {}
-    for k, a in data["answers"].items():
-        if a["type"] == "noul":
-            ans[k] = (a["noul"] >= 0.5, max(a["noul"], 1.0 - a["noul"]))
-        elif a["type"] == "score":
-            ans[k] = (a["legend"][str(int(round(a["score"])))], a.get("confidence", 0.0))
-        else:
-            ans[k] = (a["choice"], a.get("confidence", 0.0))
-    cost = data.get("usage", {}).get("input_tokens", 0) * 0.042 / 1e6
-    latency_ms = int((time.time() - t0) * 1000)
-    return ans, latency_ms, cost
+    """Call the active decision backend (default 'jev', or 'laya')."""
+    backend = get_backend()
+    return backend.decide(questions or QUESTIONS, text)
 
 TARGETS = ("app", "volume", "display", "media", "system", "timer", "browser")
 SPEAK_FIRST = {"volume_mute", "system_lock", "system_sleep"}
@@ -206,8 +190,9 @@ def decide(ans):
     return ("llm", None) if cat == "information_request" else ("clarify", None)
 
 def split_actions(text, ans):
-    sans, ms, cost = jev(text, SPLIT_QUESTIONS)
-    trace_split_call("jev", ms, cost)
+    backend = get_backend()
+    sans, ms, cost = backend.decide(SPLIT_QUESTIONS, text)
+    trace_split_call(backend.name, ms, cost)
     acts = []
     for slot in ("first", "second"):
         half = {k[len(slot) + 1:]: v for k, v in sans.items() if k.startswith(slot + "_")}
@@ -337,8 +322,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         return
 
     emit(notify, "Thinking", text)
+    backend = get_backend()
+    active_gate = getattr(backend, "default_gate", GATE)
     try:
-        ans, jev_ms, cost = jev(text)
+        ans, dec_ms, cost = backend.decide(QUESTIONS, text)
     except requests.exceptions.HTTPError as exc:
         if exc.response is not None and exc.response.status_code == 401:
             err_msg = "Invalid TypeSafe API key (401). Check your keys in .env or Settings."
@@ -346,8 +333,8 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
             emit(notify, "Something went wrong", err_msg)
             return
         raise
-    trace_answers(ans, GATE)
-    trace_decision("jev", jev_ms, cost)
+    trace_answers(ans, active_gate)
+    trace_decision(backend.name, dec_ms, cost)
 
     kind, payload = decide(ans)
     if kind == "split":
