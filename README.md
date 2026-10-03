@@ -1,13 +1,20 @@
-# Hey Jev
+# Hey Jev (Windows Port)
 
-A voice assistant for your Mac. Say "Hey Jev" or hold right Option, say a thing, it does it and answers back.
+> **Port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) to Windows 10/11 x64.**  
+> Original concept and macOS architecture by Henryk Lunaris.  
+> 
+> **Referenced Projects & Licenses**:
+> - [touhidsiddiqueeraj-bit/hey-laya](https://github.com/touhidsiddiqueeraj-bit/hey-laya) — MIT License (Copyright © 2026 Touhid Siddique Eraj)
+> - [allenporter/home-assistant-laya](https://github.com/allenporter/home-assistant-laya) — Apache License 2.0 (Copyright © 2026 Allen Porter)
 
-- **Jev** (TypeSafe) makes every decision in one call, $0.00004 per request
+A voice assistant for Windows 10/11. Say "Hey Jev" or hold right Alt, say a thing, it does it and answers back.
+
+- **Jev** (TypeSafe) makes every decision in one call, $0.00004 per request (default backend)
 - **Fish Audio S2.1 Pro** speaks every reply, with emotion tags like `[chuckling]` and `[sighing]`
-- **Whisper** (local, faster-whisper) turns your voice into text
+- **Whisper** (local, faster-whisper) turns your voice into text on-device
 - An LLM only wakes up when Jev says you asked a question, not a command
 
-**Mac only.** Works on macOS Sequoia and Tahoe. It controls the Mac through AppleScript and the Keychain, so it won't run on Windows or Linux.
+**Windows 10/11 x64 Native.** Powered by WASAPI audio capture, Windows Credential Manager, pycaw volume control, and native Windows toast notifications.
 
 ## What it can do
 

@@ -11,3 +11,6 @@ build/
 dist/
 .eggs/
 assets/icon.iconset/
+vocabulary.json
+timers.json
+settings.json
