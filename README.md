@@ -1,139 +1,221 @@
-# Hey Jev (Windows Port)
+# Hey Jev (Windows 10/11 x64 Port)
 
 > **Port of [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) to Windows 10/11 x64.**  
-> Original concept and macOS architecture by Henryk Lunaris.  
-> 
-> **Referenced Projects & Licenses**:
-> - [touhidsiddiqueeraj-bit/hey-laya](https://github.com/touhidsiddiqueeraj-bit/hey-laya) — MIT License (Copyright © 2026 Touhid Siddique Eraj)
-> - [allenporter/home-assistant-laya](https://github.com/allenporter/home-assistant-laya) — Apache License 2.0 (Copyright © 2026 Allen Porter)
+> Original concept and macOS architecture by **Henryk Lunaris** (MIT License).  
+>
+> **Referenced Projects, Credits & Licenses**:
+> - **Original Repository:** [henryklunaris/hey-jev](https://github.com/henryklunaris/hey-jev) — MIT License (Copyright © 2026 Henryk Lunaris)
+> - **hey-laya:** [touhidsiddiqueeraj-bit/hey-laya](https://github.com/touhidsiddiqueeraj-bit/hey-laya) — MIT License (Copyright © 2026 Touhid Siddique Eraj)
+> - **home-assistant-laya:** [allenporter/home-assistant-laya](https://github.com/allenporter/home-assistant-laya) — Apache License 2.0 (Copyright © 2026 Allen Porter)
+> - **openWakeWord:** [dscripka/openWakeWord](https://github.com/dscripka/openWakeWord) — Apache License 2.0 (Copyright © 2023 David Scripka)
 
-A voice assistant for Windows 10/11. Say "Hey Jev" or hold right Alt, say a thing, it does it and answers back.
+---
 
-- **Jev** (TypeSafe) makes every decision in one call, $0.00004 per request (default backend)
-- **Fish Audio S2.1 Pro** speaks every reply, with emotion tags like `[chuckling]` and `[sighing]`
-- **Whisper** (local, faster-whisper) turns your voice into text on-device
-- An LLM only wakes up when Jev says you asked a question, not a command
+A high-performance voice assistant for Windows 10 and 11. Say "Hey Jev" or hold right Alt, state your request, and Hey Jev acts immediately and replies in a natural voice.
 
-**Windows 10/11 x64 Native.** Powered by WASAPI audio capture, Windows Credential Manager, pycaw volume control, and native Windows toast notifications.
+- **Local Speech Privacy:** Microphone audio is captured via Windows Audio Session API (WASAPI) and transcribed on-device using local `faster-whisper` (`small.en`, CPU int8, ~250MB, ~0.8s). No audio ever leaves your computer for turn processing.
+- **Speculative Fan-out Economics:** One TypeSafe Jev decision call evaluates all questions simultaneously (~$0.00004 per turn). Jev is the default backend; local open-weight Laya is supported alongside it.
+- **Compound Action Splitting:** Compound requests ("pause music and open Slack") execute a second targeted decision call scoped to the first and second actions—without LLM overhead.
+- **Natural Voice Synthesis:** Fish Audio S2.1 Pro with expressive emotion tags (`[chuckling]`, `[sighing]`). Scripted dialogue pre-renders into `%APPDATA%/HeyJev/cache/tts/` on initial launch for instantaneous playback.
+- **Windows-Native Action Layer:** All 33 macOS actions have been ported 1:1 to Windows 10/11 using Win32 API, `pywinauto` (UIA backend), `pycaw` audio endpoint sessions, WinRT System Media Transport Controls (SMTC), and registry theme broadcasts.
+- **Native Floating Dictation Bubble:** Frameless, topmost, click-through, per-monitor DPI aware window positioned bottom-centre with a 24-bar live RMS animated waveform.
+- **Tray & Background Lifecycle:** Closing the window hides to the Windows notification area (System Tray) while continuing to listen in the background. Explicit quit via system tray menu or `Ctrl+Q`.
 
-## What it can do
+---
 
-Open or quit apps, Mac volume up / down / mute / set, Spotify volume, play / pause / next / previous, dark mode, lock or sleep the Mac. Two things in one sentence work too: "pause Spotify and open Slack".
+## Architecture Overview
 
-Timers and reminders: "set a timer for 5 minutes", "remind me in 20 minutes to call Mum", "how long is left?", "cancel the timer". Each one counts down live in the window, and she tells you when it's done.
-
-Anything that isn't a command ("who wrote Hamlet") goes to Claude Haiku via OpenRouter and gets spoken back.
-
-## What you need
-
-- A Mac
-- Python 3 (tested on 3.14, see below if you don't have it)
-- The Spotify desktop app, for the music commands
-- Three API keys:
-  - **TypeSafe (Jev):** [https://typesafe.ai](https://typesafe.ai)
-  - **Fish Audio:** [https://fish.audio/?fpr=henryk](https://fish.audio/?fpr=henryk). Sign in, then create a key on the API keys page in your account. You don't need a paid plan or API credit: the `s2.1-pro-free` model this app uses is free on the API until the end of November 2026.
-  - **OpenRouter (optional):** [https://openrouter.ai](https://openrouter.ai), only used to answer questions
-
-### Don't have Python?
-
-Check in Terminal:
-
-```bash
-python3 --version
+```
+                                  [ User Utterance ]
+                                          │
+                     ┌────────────────────┴────────────────────┐
+                     ▼                                         ▼
+            [ Hold Right Alt ]                        [ "Hey Jev" Wake ]
+            (Global low-level hook)               (Whisper-prefix / openWakeWord)
+                     │                                         │
+                     └────────────────────┬────────────────────┘
+                                          ▼
+                            [ WASAPI Audio Capture ]
+                           (sounddevice / 16kHz mono)
+                                          │
+                                          ▼
+                         [ Local faster-whisper (CPU) ]
+                            (small.en int8, ~0.8s)
+                                          │
+                                          ▼
+                               [ Decision Engine ]
+                       ┌──────────────────┴──────────────────┐
+                       ▼                                     ▼
+             [ TypeSafe Jev (Default) ]           [ Local Laya (On-Device) ]
+           Speculative fan-out battery          Open-weight non-autoregressive
+                 (~$0.00004/turn)                      Zero network draw
+                       └──────────────────┬──────────────────┘
+                                          │
+                                          ▼
+                          [ Confidence Gate (>= 0.65) ]
+                                          │
+                                          ▼
+                             [ Windows Action Layer ]
+    ┌──────────────────────┬──────────────────────┬──────────────────────┐
+    ▼                      ▼                      ▼                      ▼
+[ App Control ]    [ Volume & Media ]     [ Dark Mode / OS ]     [ Timers & Toast ]
+  pywinauto UIA       WinRT SMTC &           HKCU Registry         Monotonic clock
+  shell:AppsFolder    pycaw sessions       WM_SETTINGCHANGE       Windows toasts
 ```
 
-If that prints a version, you're set. If not, pick one:
+---
 
-- **Easiest:** download the macOS installer from [python.org/downloads](https://www.python.org/downloads/) and run it.
-- **With Homebrew:** `brew install python`
+## Features & Windows Enhancements
 
-## Setup
+### 1. App Control & Window Management
+- **Win32 & UWP Launching:** Seamlessly launches traditional executables and packaged Microsoft Store apps via `shell:AppsFolder` and URI schemes (e.g. `spotify:`, `slack:`, `discord:`).
+- **Process-Tree Termination:** When quitting applications that minimize to tray on close (Slack, Discord, Spotify), sends `WM_CLOSE`, waits 1.5 seconds, and terminates the entire process tree to guarantee closure.
+- **Window State Control:** Minimize (`ShowWindow(SW_MINIMIZE)`) and focus/restore (`ShowWindow(SW_RESTORE)`) using `pywinauto` UIA backend with Win32 fallback.
 
-```bash
-git clone https://github.com/henryklunaris/hey-jev.git
+### 2. Audio & Media Transport
+- **WinRT SMTC Integration:** Interfaces directly with Windows `GlobalSystemMediaTransportControlsSessionManager` (SMTC). Commands (`try_play_async`, `try_pause_async`, `try_skip_next_async`) control Spotify, Chrome/Edge YouTube, Apple Music, and Media Player without keyboard simulation quirks.
+- **State-Aware Playback:** Checks active audio peak meters and SMTC playback status before issuing play/pause commands to prevent accidental toggling.
+- **Per-Application Volume:** Uses `pycaw` `ISimpleAudioVolume` to adjust Spotify's session volume independently, or `IAudioEndpointVolume` for master volume.
+- **Optional Spotify Web API:** Dedicated `spotify_api.py` module supporting direct Web API playback control.
+
+### 3. Native Dictation Bubble
+- Voice-activated dictation: say *"Hey Jev, transcribe"* or *"Hey Jev, start dictating"*.
+- Frameless, layered, topmost, click-through window positioned above the taskbar at bottom-centre.
+- Displays a 24-bar live RMS audio waveform during recording.
+- Transcribes using OpenAI / OpenRouter `gpt-4o-mini-transcribe`.
+- Automatically pastes transcribed text at the current cursor location via Win32 clipboard synthesis (`Ctrl+V`) and appends history to `%APPDATA%/HeyJev/Hey Jev dictation.jsonl`.
+
+### 4. Non-Admin Autostart
+- Implements `autostart.py` targeting Windows Task Scheduler (`schtasks.exe /Create /TN "HeyJev" /SC ONLOGON /F`) for logon execution without administrative privileges.
+- Resilient automated fallback to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+- Windows 10 or 11 (64-bit x64)
+- Python 3.10 or 3.11
+- Working microphone (configured as Default Audio Device)
+- API Keys:
+  - **TypeSafe (Jev):** [https://typesafe.ai](https://typesafe.ai) (Decision backend)
+  - **Fish Audio:** [https://fish.audio](https://fish.audio) (Text-to-Speech replies)
+  - **OpenRouter (Optional):** [https://openrouter.ai](https://openrouter.ai) (General knowledge queries)
+  - **OpenAI (Optional):** [https://openai.com](https://openai.com) (Dictation transcription)
+
+### Step-by-Step Installation
+
+```powershell
+# 1. Clone repository
+git clone https://github.com/panwarbhagwat/hey-jev.git
 cd hey-jev
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python setup.py py2app -A
-open "dist/Hey Jev - Fish Audio.app"
+
+# 2. Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Launch the application
+python app.py
 ```
 
-The py2app line builds the app bundle in alias mode, so it runs the code straight from this folder. Build it once, and again only if you move the folder.
+On first launch:
+1. The **Keys** tab will prompt for your API keys, saving them securely to **Windows Credential Manager**.
+2. `faster-whisper` will automatically download the `small.en` model (~250MB, cached locally).
+3. Scripted TTS replies are pre-rendered into `%APPDATA%/HeyJev/cache/tts/`.
+4. The status dot turns green when ready.
 
-First launch:
+---
 
-1. The Keys panel opens. Paste your three keys, they're saved in your Mac Keychain. Change them any time with the **Keys…** button.
-2. Whisper downloads its `small.en` model (about 250MB), one time.
-3. macOS will ask for **Microphone** access. Say yes.
-4. Add "Hey Jev - Fish Audio" (or your terminal, if you run from the terminal) under **System Settings > Privacy & Security > Accessibility**, or key presses are ignored.
-5. The first time it quits an app or toggles dark mode you'll get an **Automation** prompt. Say yes.
+## Usage
 
-The window goes green when it's ready. The switch in the bottom right picks how you talk to it:
+### Interaction Modes
+- **Hold Right Alt (Push-to-Talk):** Hold the Right Alt key, speak your request, and release when finished.
+- **"Hey Jev" (Always Listening):** Say *"Hey Jev"* followed by your command (e.g. *"Hey Jev, open Spotify and set volume to 50"*).
 
-- **Hold Option:** hold right Option, talk, let go.
-- **Hey Jev:** always listening. Say "Hey Jev, open Spotify" in one go, or say "Hey Jev", wait for her reply, then give the command.
+### System Tray & Window Controls
+- **Close Window (`X`):** Hides the window to the System Tray and continues listening.
+- **Restore Window:** Double-click the Hey Jev tray icon, or right-click and choose **Show Hey Jev**.
+- **Keep on Top:** Check **Keep window always on top** in Settings or right-click the tray icon.
+- **Quit:** Right-click the tray icon and select **Quit Hey Jev**, or press `Ctrl+Q`.
 
-### Or let Claude Code set it up
+### Command Line Interface
 
-Paste this into Claude Code with the repo link:
+```powershell
+# Launch graphical interface (same as app.py)
+python siri.py --ui
 
-> Clone https://github.com/henryklunaris/hey-jev and set it up on my Mac. Check Python 3 is installed and help me install it if not. Create a venv from requirements.txt, build the app with `python setup.py py2app -A`, then tell me which API keys I need, where to get them, and which macOS permissions to grant. Then open the app from the dist folder.
+# Push-to-talk mode in console (outputs live decision trace)
+python siri.py
 
-Use Claude Code (the terminal, or the Code tab in the desktop app). The chat side of Claude Desktop runs commands in a Linux sandbox, not on your Mac, so the Mac only packages fail there.
+# Always-listening wake mode
+python siri.py --wake
 
-## Using the window
+# Low-CPU openWakeWord engine
+python siri.py --wake --wake-backend openwakeword
 
-- **Minimise** with the yellow button or Cmd+M.
-- **Close** hides the window but keeps it listening. Click the Dock icon to bring it back.
-- **Keep on Top** in the Window menu (Cmd+T) keeps it above other apps. Off by default.
-- **Quit** with Cmd+Q.
-
-## Running from the terminal
-
-Useful for seeing the Jev trace (every question, answer and confidence per turn):
-
-```bash
-.venv/bin/python siri.py               # hold right Option mode, trace prints to the terminal
-.venv/bin/python siri.py --wake        # Hey Jev mode, always listening
-.venv/bin/python siri.py --text "open spotify and turn it down"   # one turn, no mic
-.venv/bin/python siri.py --ui          # same as the app, but shows as "Python" in the Dock
+# Text-only test turn (no microphone required)
+python siri.py --text "pause music and open slack"
 ```
 
-Keys can also go in a `.env` file in this folder (`TYPESAFE_API_KEY`, `FISH_AUDIO_API_KEY`, `OPENROUTER_API_KEY`). A key in `.env` takes priority over the one saved in the Keychain.
+---
 
-## How it works
+## Packaging into Standalone Windows Executable
 
-1. Audio is recorded while you hold right Option. In Hey Jev mode the mic stays open, and each phrase is transcribed locally and only acted on if it starts with "Hey Jev".
-2. faster-whisper transcribes it locally for free, about 0.8s.
-3. One Jev call asks every question at once (category, is it compound, target, which app, which action, volume level, and so on). The code ignores the answers that don't apply. This is the speculative fan-out pattern from the TypeSafe docs.
-4. If Jev says the request is two things, a second Jev call asks the same questions twice, scoped to "the first action" and "the second action". No LLM needed to split.
-5. The action runs as a one line `osascript` or shell command.
-6. A scripted reply with emotion tags is picked at random and played. All scripted lines are pre-rendered into `cache/tts/` on first launch, so replies are instant. Only LLM answers are generated live.
+Hey Jev includes a pre-configured PyInstaller specification (`hey_jev.spec`) that produces a windowed, one-dir executable with zero console window flashing:
 
-Below 0.65 confidence it asks you to say it again, twice in a row and it gives up.
+```powershell
+# Build standalone distribution
+pyinstaller hey_jev.spec --noconfirm --clean
 
-## What it costs
+# The resulting distribution is located in:
+dist\Hey Jev\Hey Jev.exe
+```
 
-- **Fish Audio:** $0. The `s2.1-pro-free` model string on the API is free until the end of November 2026. You don't need to top up API credits. (Their MCP and web playground bill your plan credits instead, this app doesn't use those.) After November the paid `s2.1-pro` is $15 per million characters, and the cached replies mean a normal day of use is a few cents.
-- **Jev:** $0.042 per million input tokens, output free. One command is about $0.00004, a two part command about $0.00011.
-- **Whisper:** free, runs on your Mac.
-- **OpenRouter (questions only):** Claude Haiku, about $0.0002 per answer.
+---
 
-## Troubleshooting
+## Decision Backend Benchmark (Jev vs Laya)
 
-- **Holding Option does nothing.** The app needs Accessibility access. Add it under System Settings > Privacy & Security > Accessibility, then quit and reopen it.
-- **"401 Unauthorized" in the window.** One of your keys is wrong or expired. Re-paste it with the Keys… button. If you also have a `.env`, check the key there, because it wins over the Keychain.
-- **The app won't open again.** It's probably still running with the window closed. Click its Dock icon, or quit it properly with Cmd+Q and open it again.
-- **It stopped controlling apps after a macOS update.** Updates can reset permissions. Check Microphone, Accessibility and Automation under Privacy & Security again.
+As evaluated in `BENCHMARK_REPORT.md`:
 
-## Files
+| Metric | TypeSafe Jev (Hosted System 1) | Local Laya (On-Device Model) |
+|---|---|---|
+| **Turn Accuracy** | 98.1% | 84.8% |
+| **p50 Latency** | 224 ms | 712 ms (CPU) |
+| **p95 Latency** | 382 ms | 1,480 ms (CPU) |
+| **RAM Footprint** | ~140 MB | ~1.85 GB |
+| **Cost Per Turn** | ~$0.00004 | $0.00 |
+| **Host Stability** | 100% Green | OS Commitment limit on constrained pagefiles |
+| **Default Selection** | **YES (Recommended Default)** | Additive (Toggle in Settings) |
 
-- `siri.py` all the logic: questions, actions, replies, Whisper, Fish, LLM fallback
-- `assistant_ui.py` the status window, mode switch and Keys panel
-- `secrets_store.py` Keychain read / write
-- `app.py` and `setup.py` the app bundle entry point and the py2app config, output lands in `dist/`
-- `assets/` the app icon
+To run the automated benchmark on your hardware:
+```powershell
+python benchmark_backends.py --samples 50 --runs 2
+```
 
-## Change the voice
+---
 
-`VOICE_ID` at the top of `siri.py`. Find voices at [https://fish.audio](https://fish.audio), open one and copy its ID from the page link. Her replies re-render in the new voice automatically on the next launch.
+## File Structure
+
+- `app.py`: Standard executable entrypoint.
+- `siri.py`: Main event loop, Whisper speech recognition, decision routing, audio dispatch.
+- `assistant_ui.py`: PySide6 native 7-tab interface and Windows notification area system tray integration.
+- `bubble.py`: Frameless floating waveform dictation window.
+- `actions_win.py`: Complete Windows 10/11 action parity implementation (Win32, UIA, pycaw, SMTC).
+- `backend.py`: `DecisionBackend` abstraction with `JevBackend` and `LayaBackend`.
+- `wake_word.py`: Wake word detector abstraction (`WhisperPrefixDetector` and `OpenWakeWordDetector`).
+- `spotify_api.py`: Optional Spotify Web API OAuth client.
+- `autostart.py`: Windows Task Scheduler and HKCU Run autostart manager.
+- `secrets_store.py`: Windows Credential Manager integration via `keyring`.
+- `hey_jev.spec`: PyInstaller one-dir windowed build specification.
+
+---
+
+## License & Credits
+
+- Original macOS implementation: Copyright © 2026 Henryk Lunaris ([MIT License](https://github.com/henryklunaris/hey-jev/blob/main/LICENSE)).
+- Windows 10/11 port and enhancements: MIT License.
+- Laya reference implementations: `hey-laya` (MIT License © 2026 Touhid Siddique Eraj) and `home-assistant-laya` (Apache 2.0 © 2026 Allen Porter).
+- openWakeWord: Apache 2.0 © 2023 David Scripka.

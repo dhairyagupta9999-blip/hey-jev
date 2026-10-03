@@ -2,6 +2,12 @@
 
 All notable changes to the Windows 10/11 port of `hey-jev` will be documented in this file.
 
+## [Phase 5: Enhancements] - 2026-10-03
+- Integrated WinRT System Media Transport Controls (SMTC) for direct, state-aware media control across all active Windows media players (Spotify, YouTube in browser, Media Player).
+- Added `wake_word.py` engine supporting low-CPU streaming openWakeWord detection alongside baseline Whisper-prefix regex gate.
+- Implemented optional Spotify Web API client (`spotify_api.py`) with OAuth token handling.
+- Added comprehensive About dialog and detailed Windows documentation in `README.md` with strict attribution to `henryklunaris/hey-jev` and credit to referenced Laya projects.
+
 ## [Phase 4: Packaging & Distribution] - 2026-10-03
 - Created Windows PyInstaller specification (`hey_jev.spec`) building a standalone `--onedir --windowed` distribution with zero console flashing.
 - Implemented `autostart.py` supporting Windows Task Scheduler at-logon execution without requiring admin privileges, backed by HKCU Run fallback.

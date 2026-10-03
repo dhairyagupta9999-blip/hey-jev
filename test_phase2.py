@@ -66,9 +66,10 @@ class TestPhase2ActionParity(unittest.TestCase):
         # Restore
         actions_win.set_dark_mode(not current_light)
 
+    @patch("actions_win._smtc_cmd", return_value=False)
     @patch("actions_win.send_vk")
     @patch("actions_win.is_audio_playing")
-    def test_state_aware_playback(self, mock_playing, mock_send_vk):
+    def test_state_aware_playback(self, mock_playing, mock_send_vk, mock_smtc):
         """Verify media_play and media_pause only toggle when state must change."""
         # 1. When audio is NOT playing, play should toggle
         mock_playing.return_value = False

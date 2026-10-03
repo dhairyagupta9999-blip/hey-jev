@@ -103,8 +103,51 @@ def set_spotify_volume(level_percent: int):
         scalar = max(0.0, min(1.0, level_percent / 100.0))
         s.SimpleAudioVolume.SetMasterVolume(scalar, None)
 
+def _smtc_cmd(cmd_name: str) -> bool:
+    """Execute direct media command via Windows System Media Transport Controls (SMTC)."""
+    try:
+        import asyncio
+        import winsdk.windows.media.control as wmc
+        async def _run():
+            mgr = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async()
+            sess = mgr.get_current_session()
+            if not sess:
+                return False
+            if cmd_name == "play":
+                return await sess.try_play_async()
+            elif cmd_name == "pause":
+                return await sess.try_pause_async()
+            elif cmd_name == "toggle":
+                return await sess.try_toggle_play_pause_async()
+            elif cmd_name == "next":
+                return await sess.try_skip_next_async()
+            elif cmd_name == "previous":
+                return await sess.try_skip_previous_async()
+            return False
+        return asyncio.run(_run())
+    except Exception:
+        return False
+
 def is_audio_playing() -> bool:
-    """Check if audio is actively playing (via Spotify session peak or any system session)."""
+    """Check if audio is actively playing via WinRT SMTC session or pycaw session peak."""
+    # 1. Query WinRT SMTC session status
+    try:
+        import asyncio
+        import winsdk.windows.media.control as wmc
+        async def _check_smtc():
+            mgr = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async()
+            sess = mgr.get_current_session()
+            if sess:
+                info = sess.get_playback_info()
+                if info and info.playback_status == wmc.GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING:
+                    return True
+            return False
+        if asyncio.run(_check_smtc()):
+            return True
+    except Exception:
+        pass
+
+    # 2. Query pycaw Spotify session peak meter
     s = _get_spotify_session()
     if s:
         try:
@@ -116,21 +159,31 @@ def is_audio_playing() -> bool:
             pass
     return False
 
-# --------------------------------------------------------------------------- Media Transport (State-Aware)
+# --------------------------------------------------------------------------- Media Transport (SMTC + VK Fallback)
 def media_play():
-    """State-aware play: only toggle if not already playing."""
+    """State-aware play: use SMTC try_play_async first, fallback to VK_MEDIA_PLAY_PAUSE toggle."""
+    if _smtc_cmd("play"):
+        return
     if not is_audio_playing():
         send_vk(VK_MEDIA_PLAY_PAUSE)
 
 def media_pause():
-    """State-aware pause: only toggle if audio is actively playing."""
+    """State-aware pause: use SMTC try_pause_async first, fallback to VK_MEDIA_PLAY_PAUSE toggle."""
+    if _smtc_cmd("pause"):
+        return
     if is_audio_playing():
         send_vk(VK_MEDIA_PLAY_PAUSE)
 
 def media_next():
+    """Next track: use SMTC try_skip_next_async first, fallback to VK_MEDIA_NEXT_TRACK."""
+    if _smtc_cmd("next"):
+        return
     send_vk(VK_MEDIA_NEXT_TRACK)
 
 def media_previous():
+    """Previous track: use SMTC try_skip_previous_async first, fallback to double VK_MEDIA_PREV_TRACK."""
+    if _smtc_cmd("previous"):
+        return
     send_vk(VK_MEDIA_PREV_TRACK)
     time.sleep(0.3)
     send_vk(VK_MEDIA_PREV_TRACK)

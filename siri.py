@@ -36,6 +36,7 @@ from logger import (
     trace_action, trace_say, trace_fish
 )
 import actions_win
+from wake_word import get_wake_detector, OpenWakeWordDetector
 
 # --------------------------------------------------------------------------- Secrets & Constants
 TS_KEY = get_secret("TYPESAFE_API_KEY")
@@ -396,7 +397,7 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
 def ready_text(wake):
     return "Say \u201cHey Jev\u201d and your command" if wake else "Hold right Alt to talk"
 
-def run_voice_assistant(notify=None, controls=None, mode="ptt", mic=""):
+def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_backend="whisper", wake_model=None):
     print("loading whisper...")
     emit(notify, "Starting", "Loading Whisper\u2026")
     rec = Recorder(mic)
@@ -404,6 +405,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic=""):
     armed_until = [0.0]
     dictation = Dictation(NAMES, lambda: (OA_KEY, OR_KEY), SAMPLE_RATE)
     late_timers = []
+    wake_detector = get_wake_detector(wake_backend, wake_model)
 
     def transcribe(audio, prompt, drop_noise=False):
         return transcribe_audio(audio, prompt, drop_noise)
@@ -491,8 +493,30 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic=""):
                 print(f"\n  wake turn failed: {exc}")
 
     def wake_turn(audio):
+        if isinstance(wake_detector, OpenWakeWordDetector) and wake_detector.is_available:
+            detected, name, score = wake_detector.feed_audio(audio)
+            if detected:
+                print(f"\n  (openwakeword detected: {name} score={score:.2f})")
+                with busy:
+                    rec.paused = True
+                    try:
+                        play_chime("wake")
+                        time.sleep(0.2)
+                    finally:
+                        rec.paused = False
+                armed_until[0] = time.time() + WAKE_WINDOW
+                emit(notify, "Listening", "Go ahead\u2026")
+                return
+            elif armed_until[0] and time.time() < armed_until[0]:
+                armed_until[0] = 0
+                text, ms = transcribe(audio, COMMAND_PROMPT, drop_noise=True)
+                if text.strip():
+                    run_turn(text, ms, quiet=True)
+                return
+            return
+
         text, ms = transcribe(audio, WAKE_PROMPT, drop_noise=True)
-        m = WAKE.search(text)
+        m = wake_detector.detect_utterance(text)
         if m:
             print(f"\n  (wake: {text!r})")
             rest = text[m.end():].strip(" .,!?")
@@ -587,6 +611,8 @@ def main():
     ap.add_argument("--text", help="skip the mic, run one turn on this transcript")
     ap.add_argument("--wake", action="store_true", help="always listening, say \"Hey Jev\" instead of holding Alt")
     ap.add_argument("--ui", action="store_true", help="launch graphical interface")
+    ap.add_argument("--wake-backend", choices=["whisper", "openwakeword"], default="whisper", help="wake engine (whisper or openwakeword)")
+    ap.add_argument("--wake-model", help="path to custom openWakeWord model (.onnx / .tflite)")
     args = ap.parse_args()
 
     if args.ui:
@@ -601,7 +627,11 @@ def main():
         handle(args.text)
         return
 
-    run_voice_assistant(mode="wake" if args.wake else "ptt")
+    run_voice_assistant(
+        mode="wake" if args.wake else "ptt",
+        wake_backend=args.wake_backend,
+        wake_model=args.wake_model
+    )
 
 if __name__ == "__main__":
     main()

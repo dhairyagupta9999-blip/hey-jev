@@ -13,4 +13,6 @@ PySide6>=6.6.0
 pystray>=0.19.5
 pillow>=10.0.0
 pyinstaller>=6.0.0
+winsdk>=1.0.0b10
+openwakeword>=0.6.0
 laya>=0.3.24

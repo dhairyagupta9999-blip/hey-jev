@@ -337,6 +337,10 @@ class MainWindow(QMainWindow):
         top_action.triggered.connect(self._toggle_keep_on_top)
         tray_menu.addAction(top_action)
 
+        about_action = QAction("About Hey Jev\u2026", self)
+        about_action.triggered.connect(self._show_about_dialog)
+        tray_menu.addAction(about_action)
+
         tray_menu.addSeparator()
 
         quit_action = QAction("Quit Hey Jev", self)
@@ -362,6 +366,22 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, cur)
         self.show()
+
+    def _show_about_dialog(self):
+        msg = (
+            "<h3>Hey Jev (Windows 10/11 x64 Port)</h3>"
+            "<p><b>Version:</b> 1.0 (Windows Port)</p>"
+            "<p><b>Original Concept & macOS Architecture:</b><br>"
+            "Port of <a href='https://github.com/henryklunaris/hey-jev'>henryklunaris/hey-jev</a> by Henryk Lunaris (MIT License).</p>"
+            "<p><b>Decision Backends:</b><br>"
+            "• TypeSafe Jev (Speculative fan-out System 1, default)<br>"
+            "• Laya (Local open-weight System 1)</p>"
+            "<p><b>Referenced Projects & Credits:</b><br>"
+            "• <a href='https://github.com/touhidsiddiqueeraj-bit/hey-laya'>hey-laya</a> — MIT License (© 2026 Touhid Siddique Eraj)<br>"
+            "• <a href='https://github.com/allenporter/home-assistant-laya'>home-assistant-laya</a> — Apache 2.0 (© 2026 Allen Porter)<br>"
+            "• <a href='https://github.com/dscripka/openWakeWord'>openWakeWord</a> — Apache 2.0 (© David Scripka)</p>"
+        )
+        QMessageBox.about(self, "About Hey Jev", msg)
 
     def _set_mode(self, mode: str):
         self.settings["mode"] = mode
