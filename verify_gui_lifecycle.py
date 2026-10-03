@@ -1,8 +1,8 @@
 """Full verification of Hey Jev.exe Windows GUI lifecycle:
 1. Window opens and is visible on Windows desktop.
-2. System tray icon active and verified via OS observation (Shell_NotifyIcon window and Explorer tray area).
+2. System tray message window exists (taskbar icon not observed in non-interactive environment).
 3. Close hides to tray (window hidden, process alive).
-4. Quit exits process cleanly through real tray action / Ctrl+Q hotkey path (NO proc.terminate()).
+4. Quit exits process cleanly through application quit path (NO proc.terminate()).
 """
 import os
 import sys
@@ -98,7 +98,7 @@ except Exception as e:
     print(f"    - Screenshot capture note: {e} (headless/virtual desktop session active)")
 
 assert tray_hwnd is not None or tray_wnd != 0, "Error: System tray notification sink not observed in OS"
-print("    -> CONFIRMED: System tray icon is actively registered with Windows OS!")
+print("    -> message window exists; taskbar icon NOT observed (no interactive desktop)")
 
 # Simulate user clicking Close button
 print("[4] Simulating user clicking 'X' Close button (WM_CLOSE)...")
@@ -110,13 +110,10 @@ is_alive = proc.poll() is None
 print(f"    After close button: Window Visible={is_visible}, Process Alive={is_alive}")
 assert not is_visible, "Error: Window should be hidden on close"
 assert is_alive, "Error: Process should remain alive in background"
-print("    -> CONFIRMED: Window hid to system tray and process continues listening!")
+print("    -> Window hidden to tray; process continues running in background")
 
-# Real Quit action test (NO proc.terminate())
-print("[5] Testing real Quit through application quit path (WM_HOTKEY Ctrl+Q / WM_COMMAND)...")
-# Send WM_HOTKEY (0x0312) with hotkey ID 101 (Ctrl+Q) or WM_COMMAND to hwnd
-u.PostMessageW(hwnd, 0x0312, 101, 0x00510002) # WM_HOTKEY: Ctrl+Q
-# Also post WM_COMMAND for tray menu quit parity
+# Quit action test via posted message (NO proc.terminate())
+print("[5] Testing Quit via posted message (WM_COMMAND)...")
 u.PostMessageW(hwnd, 0x0111, 0, 0)
 
 # Await clean termination
@@ -127,8 +124,13 @@ for i in range(20):
     if exit_code is not None:
         break
 
-print(f"[6] After real Quit trigger: HasExited={exit_code is not None}, ExitCode={exit_code}")
-assert exit_code is not None, "Error: Process failed to exit through real Quit action"
+print(f"[6] After Quit trigger: HasExited={exit_code is not None}, ExitCode={exit_code}")
+assert exit_code is not None, "Error: Process failed to exit through Quit action"
 assert exit_code == 0, f"Error: Process exited with non-zero code {exit_code}"
-print("    -> CONFIRMED: Real Quit path terminated the application cleanly with exit code 0 (NO proc.terminate used)!")
-print("\nALL GUI LIFECYCLE CHECKS PASSED SUCCESSFULLY WITH ZERO REGRESSIONS.")
+print("    -> quit function invoked via posted message; real Ctrl+Q and tray-menu Quit NOT tested")
+
+print("\nNeeds manual verification:")
+print("  1. Visual tray icon appearance in the Windows taskbar / notification overflow area.")
+print("  2. Double-click tray icon to toggle show/hide.")
+print("  3. Right-click tray icon context menu and select 'Quit Hey Jev'.")
+print("  4. Physical Ctrl+Q keyboard shortcut when Hey Jev main window has focus (and verify it is not global).")

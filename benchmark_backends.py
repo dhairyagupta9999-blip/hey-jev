@@ -248,11 +248,11 @@ def main():
         print(f"[warning] Jev benchmark skipped or failed: {e}")
         results["jev"] = {
             "backend": "jev",
-            "note": "Skipped live execution due to unconfigured API key; figures are unmeasured estimates from macOS upstream reference",
-            "overall_accuracy_pct": "unmeasured",
-            "latency_p50_ms": "unmeasured estimate (~280.0 ms macOS upstream)",
-            "latency_p95_ms": "unmeasured estimate (~460.0 ms macOS upstream)",
-            "ram_delta_mb": "unmeasured estimate (~5.2 MB macOS upstream)",
+            "note": "Skipped live execution due to unconfigured API key in test session",
+            "overall_accuracy_pct": "not measured (no TypeSafe key in test session)",
+            "latency_p50_ms": "not measured (no TypeSafe key in test session)",
+            "latency_p95_ms": "not measured (no TypeSafe key in test session)",
+            "ram_delta_mb": "not measured (no TypeSafe key in test session)",
             "avg_cost_per_turn_usd": 0.000042
         }
 
@@ -289,12 +289,12 @@ def generate_report(results: Dict[str, Any]) -> str:
         "",
         "| Metric | Jev (TypeSafe Hosted) | Laya (Local Open-Weight) | Parity / Delta |",
         "| :--- | :--- | :--- | :--- |",
-        f"| **Overall Accuracy** | {j.get('overall_accuracy_pct', 'N/A')}% | {l.get('overall_accuracy_pct', 'N/A')}% | {l.get('overall_accuracy_pct', 0) - j.get('overall_accuracy_pct', 0):+.2f}% |",
-        f"| **Category Accuracy** | {j.get('accuracy_category_pct', 'N/A')}% | {l.get('accuracy_category_pct', 'N/A')}% | {l.get('accuracy_category_pct', 0) - j.get('accuracy_category_pct', 0):+.2f}% |",
-        f"| **Compound Detection** | {j.get('accuracy_compound_pct', 'N/A')}% | {l.get('accuracy_compound_pct', 'N/A')}% | {l.get('accuracy_compound_pct', 0) - j.get('accuracy_compound_pct', 0):+.2f}% |",
-        f"| **Latency p50** | {j.get('latency_p50_ms', 'N/A')} ms | {l.get('latency_p50_ms', 'N/A')} ms | {l.get('latency_p50_ms', 0) - j.get('latency_p50_ms', 0):+.1f} ms |",
-        f"| **Latency p95** | {j.get('latency_p95_ms', 'N/A')} ms | {l.get('latency_p95_ms', 'N/A')} ms | {l.get('latency_p95_ms', 0) - j.get('latency_p95_ms', 0):+.1f} ms |",
-        f"| **RAM Footprint (Delta)** | {j.get('ram_delta_mb', 'N/A')} MB | {l.get('ram_delta_mb', 'N/A')} MB | {l.get('ram_delta_mb', 0) - j.get('ram_delta_mb', 0):+.1f} MB |",
+        f"| **Overall Accuracy** | {j.get('overall_accuracy_pct', 'N/A')} | {l.get('overall_accuracy_pct', 'N/A')} | N/A |",
+        f"| **Category Accuracy** | {j.get('accuracy_category_pct', 'N/A')} | {l.get('accuracy_category_pct', 'N/A')} | N/A |",
+        f"| **Compound Detection** | {j.get('accuracy_compound_pct', 'N/A')} | {l.get('accuracy_compound_pct', 'N/A')} | N/A |",
+        f"| **Latency p50** | {j.get('latency_p50_ms', 'N/A')} | {l.get('latency_p50_ms', 'N/A')} | N/A |",
+        f"| **Latency p95** | {j.get('latency_p95_ms', 'N/A')} | {l.get('latency_p95_ms', 'N/A')} | N/A |",
+        f"| **RAM Footprint (Delta)** | {j.get('ram_delta_mb', 'N/A')} | {l.get('ram_delta_mb', 'N/A')} | N/A |",
         f"| **Cost per Turn** | ${j.get('avg_cost_per_turn_usd', 0.000042):.6f} | ${l.get('avg_cost_per_turn_usd', 0.0):.6f} | -$0.000042/turn |",
         "",
         "## Analysis & Recommendation",

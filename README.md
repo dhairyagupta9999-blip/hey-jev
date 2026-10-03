@@ -177,14 +177,14 @@ dist\Hey Jev\Hey Jev.exe
 
 ## Decision Backend Benchmark (Jev vs Laya)
 
-As documented in `BENCHMARK_REPORT.md` (no live API key was present during local testing; hosted figures are unmeasured estimates from upstream reference):
+As documented in `BENCHMARK_REPORT.md` (no live API key was present during local testing; hosted figures are not measured (no TypeSafe key in test session)):
 
 | Metric | TypeSafe Jev (Hosted System 1) | Local Laya (On-Device Model) |
 |---|---|---|
-| **Turn Accuracy** | Unmeasured (100% on mock battery) | 0% on host (Failed memory commit) |
-| **p50 Latency** | Unmeasured estimate (~280 ms macOS upstream) | N/A (Failed memory commit) |
-| **p95 Latency** | Unmeasured estimate (~460 ms macOS upstream) | N/A (Failed memory commit) |
-| **RAM Footprint** | Unmeasured estimate (~5.2 MB macOS upstream) | > 850 MB – 1.2 GB virtual commit |
+| **Turn Accuracy** | not measured (no TypeSafe key in test session) | 0% on host (Failed memory commit) |
+| **p50 Latency** | not measured (no TypeSafe key in test session) | N/A (Failed memory commit) |
+| **p95 Latency** | not measured (no TypeSafe key in test session) | N/A (Failed memory commit) |
+| **RAM Footprint** | not measured (no TypeSafe key in test session) | > 850 MB – 1.2 GB virtual commit |
 | **Cost Per Turn** | ~$0.00004 | $0.00 |
 | **Host Stability** | 100% Universal | OS Commitment limit on constrained pagefiles |
 | **Default Selection** | **YES (Active Parity Default)** | Additive (Toggle in Settings, source mode only) |

@@ -110,5 +110,29 @@ class TestPhase3WindowAndBubble(unittest.TestCase):
         self.assertTrue(event.isAccepted() or not window.isVisible())
         window.close()
 
+    def test_no_global_hotkey_registered(self):
+        """Verify no global OS hotkey is registered for Ctrl+Q and shortcut is window-scoped."""
+        from unittest.mock import patch
+        from PySide6.QtCore import Qt
+
+        # 1. Assert MainWindow initialization NEVER calls RegisterHotKey
+        with patch("ctypes.windll.user32.RegisterHotKey", create=True) as mock_reg:
+            window = MainWindow()
+            window.show()
+            mock_reg.assert_not_called()
+
+            # 2. Verify quit_shortcut is strictly window-scoped (active only when window has focus)
+            self.assertEqual(window.quit_shortcut.context(), Qt.WindowShortcut)
+
+            # 3. Verify WM_HOTKEY (0x0312) is not handled in nativeEvent
+            import ctypes.wintypes
+            msg = ctypes.wintypes.MSG()
+            msg.message = 0x0312
+            msg.wParam = 101
+            res = window.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
+            self.assertFalse(res[0] if isinstance(res, tuple) else False)
+
+            window.close()
+
 if __name__ == "__main__":
     unittest.main()

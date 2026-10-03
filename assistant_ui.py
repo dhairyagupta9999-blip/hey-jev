@@ -133,18 +133,10 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._init_tray()
 
-        # Window-level Ctrl+Q shortcut
+        # Window-scoped Ctrl+Q shortcut (active only when Hey Jev window has focus)
         self.quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.quit_shortcut.setContext(Qt.WindowShortcut)
         self.quit_shortcut.activated.connect(self._quit_application)
-
-        # Register global OS-level Ctrl+Q hotkey on Windows
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                # 0x0002 = MOD_CONTROL, 0x51 = 'Q'
-                ctypes.windll.user32.RegisterHotKey(int(self.winId()), 101, 0x0002, 0x51)
-            except Exception:
-                pass
 
         # Timer countdown tick
         self.tick_timer = QTimer(self)
@@ -893,31 +885,20 @@ class MainWindow(QMainWindow):
             self._quit_application()
 
     def nativeEvent(self, event_type, message):
-        """Handle native Windows events including OS-level hotkeys (Ctrl+Q) and tray messages."""
+        """Handle native Windows events."""
         if sys.platform == "win32" and event_type == b"windows_generic_MSG":
             try:
-                import ctypes
                 import ctypes.wintypes
                 msg = ctypes.wintypes.MSG.from_address(int(message))
-                # 0x0312 is WM_HOTKEY, wParam 101 is Ctrl+Q
-                if msg.message == 0x0312 and msg.wParam == 101:
-                    self._quit_application()
-                    return True, 0
-                # 0x0111 is WM_COMMAND (standard Win32 menu / accelerator / tray quit)
+                # 0x0111 is WM_COMMAND (standard Win32 command / test quit path)
                 if msg.message == 0x0111:
                     self._quit_application()
                     return True, 0
             except Exception:
                 pass
-        return super().nativeEvent(event_type, message)
+        return False, 0
 
     def _quit_application(self):
-        try:
-            if sys.platform == "win32":
-                import ctypes
-                ctypes.windll.user32.UnregisterHotKey(int(self.winId()), 101)
-        except Exception:
-            pass
         self.bubble.close()
         QApplication.quit()
 

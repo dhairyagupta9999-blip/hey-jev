@@ -1,11 +1,11 @@
 {
   "jev": {
     "backend": "jev",
-    "note": "Skipped live execution due to unconfigured API key; metrics below are unmeasured estimates from macOS upstream reference",
-    "overall_accuracy_pct": "unmeasured (100% on mock battery)",
-    "latency_p50_ms": "unmeasured estimate (~280.0 ms macOS upstream)",
-    "latency_p95_ms": "unmeasured estimate (~460.0 ms macOS upstream)",
-    "ram_delta_mb": "unmeasured estimate (~5.2 MB macOS upstream)",
+    "note": "Skipped live execution due to unconfigured API key in test session",
+    "overall_accuracy_pct": "not measured (no TypeSafe key in test session)",
+    "latency_p50_ms": "not measured (no TypeSafe key in test session)",
+    "latency_p95_ms": "not measured (no TypeSafe key in test session)",
+    "ram_delta_mb": "not measured (no TypeSafe key in test session)",
     "avg_cost_per_turn_usd": 4.2e-05
   },
   "laya": {
