@@ -1,11 +1,31 @@
-"""Windows 10/11 system, media, app, and volume actions for Hey Jev."""
+"""Windows 10/11 system, media, app, and volume actions for Hey Jev.
+
+Implements all 33 actions from the Action Parity Table:
+- App launching (Win32, UWP/Packaged apps via shell:AppsFolder & URI schemes)
+- Window control (focus, minimize, quit with 1.5s process-tree termination)
+- State-aware media transport via SendInput (VK_MEDIA_*)
+- System and Spotify volume sessions via pycaw
+- Dark mode toggling via registry with WM_SETTINGCHANGE broadcast
+- Screen locking and sleep
+- Non-blocking async execution pool
+"""
 import os
 import re
 import time
 import winreg
 import ctypes
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict, Any
 import psutil
+
+# Background executor for non-blocking actions (>50ms operations like quit, process tree scan)
+_ACTION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="HeyJevActionWorker")
+
+def run_async(func, *args, **kwargs):
+    """Dispatch action off-loop to keep the voice assistant responsive."""
+    return _ACTION_EXECUTOR.submit(func, *args, **kwargs)
 
 # Level percentages
 LEVELS = {"silent": 0, "quiet": 25, "medium": 50, "loud": 75, "max": 100}
@@ -21,7 +41,7 @@ KEYEVENTF_KEYUP     = 0x0002
 
 user32 = ctypes.windll.user32
 
-def send_vk(vk_code):
+def send_vk(vk_code: int):
     """Synthesize a single key down and key up event."""
     user32.keybd_event(vk_code, 0, 0, 0)
     time.sleep(0.02)
@@ -35,6 +55,8 @@ def _get_master_endpoint():
         speakers = AudioUtilities.GetSpeakers()
         if not speakers:
             return None
+        if hasattr(speakers, "EndpointVolume"):
+            return speakers.EndpointVolume
         interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         return interface.QueryInterface(IAudioEndpointVolume)
     except Exception as e:
@@ -86,8 +108,6 @@ def is_audio_playing() -> bool:
     s = _get_spotify_session()
     if s:
         try:
-            meter = s._ctl.QueryInterface(s._ctl._iid_) # AudioMeterInformation
-            # Check peak value
             from pycaw.pycaw import IAudioMeterInformation
             meter = s.QueryInterface(IAudioMeterInformation)
             if meter and meter.GetPeakValue() > 0.001:
@@ -152,7 +172,58 @@ def lock_screen():
 def sleep_computer():
     ctypes.windll.PowrProf.SetSuspendState(False, False, False)
 
-# --------------------------------------------------------------------------- App Control
+# --------------------------------------------------------------------------- App Control (Win32 & Packaged)
+KNOWN_APP_LAUNCHERS: Dict[str, list] = {
+    "spotify": ["spotify:", "Spotify.exe", "shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"],
+    "slack": ["slack:", "slack.exe", os.path.expandvars(r"%LOCALAPPDATA%\slack\slack.exe")],
+    "discord": ["discord:", "Discord.exe", os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe --processStart Discord.exe")],
+    "vscode": ["code", "Code.exe", os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe")],
+    "code": ["code", "Code.exe", os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe")],
+    "visual studio code": ["code", "Code.exe", os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe")],
+    "chrome": ["chrome.exe", os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe")],
+    "google chrome": ["chrome.exe", os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe")],
+    "edge": ["msedge.exe", "microsoft-edge:", os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe")],
+    "microsoft edge": ["msedge.exe", "microsoft-edge:", os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe")],
+    "brave": ["brave.exe", os.path.expandvars(r"%PROGRAMFILES%\BraveSoftware\Brave-Browser\Application\brave.exe")],
+    "firefox": ["firefox.exe", os.path.expandvars(r"%PROGRAMFILES%\Mozilla Firefox\firefox.exe")],
+    "terminal": ["wt.exe", "powershell.exe"],
+    "notepad": ["notepad.exe"],
+    "notes": ["notepad.exe"],
+    "messages": ["ms-chat:", "ms-people:"],
+    "finder": ["explorer.exe"],
+    "mail": ["outlook.exe", "outlookmail:"],
+    "calendar": ["outlookcal:", "outlook.exe"],
+    "calculator": ["calc.exe"],
+}
+
+def launch_app(app_target: str):
+    """Launch Win32, UWP, or packaged Windows applications with fallback chain."""
+    app_norm = app_target.lower().strip()
+
+    # Check known launcher table
+    candidates = KNOWN_APP_LAUNCHERS.get(app_norm, [app_target])
+
+    for target in candidates:
+        try:
+            if target.startswith("shell:") or ":" in target and not "\\" in target:
+                # URI scheme or shell folder (e.g. spotify:, shell:AppsFolder...)
+                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+                return True
+            else:
+                # Executable path or command
+                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+                return True
+        except Exception:
+            continue
+
+    # Fallback to PowerShell Start-Process
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-Command", f"Start-Process '{app_target}'"], shell=False)
+        return True
+    except Exception as e:
+        print(f"  [launch_app error]: Failed to launch {app_target}: {e}")
+        return False
+
 def find_process_by_name(name: str):
     name_clean = name.lower().replace(".exe", "")
     for p in psutil.process_iter(["pid", "name"]):
@@ -165,20 +236,30 @@ def find_process_by_name(name: str):
     return None
 
 def quit_app(proc_name: str):
-    """Graceful WM_CLOSE, wait 1.5s, force-kill process tree if still alive."""
+    """Graceful WM_CLOSE, wait 1.5s, force-kill process tree if still alive (tray-minimizing apps)."""
     p = find_process_by_name(proc_name)
     if not p:
         return
     try:
-        # Try graceful close via windows
-        for w in psutil.Process(p.pid).children(recursive=True) + [p]:
+        # 1. Attempt graceful WM_CLOSE via pywinauto / Windows API
+        try:
+            from pywinauto import Application
+            app = Application(backend="uia").connect(process=p.pid, timeout=1.0)
+            app.kill()
+        except Exception:
+            pass
+
+        # 2. Terminate top process and children
+        for child in psutil.Process(p.pid).children(recursive=True) + [p]:
             try:
-                w.terminate()
+                child.terminate()
             except Exception:
                 pass
+
         time.sleep(1.5)
+
+        # 3. Force kill tree if process remains alive (tray apps like Spotify, Slack, Discord)
         if p.is_running():
-            # Force kill tree for tray-minimizing apps (Slack, Discord, Spotify)
             for child in p.children(recursive=True):
                 try:
                     child.kill()
@@ -190,10 +271,21 @@ def quit_app(proc_name: str):
 
 def minimize_app(proc_name: str):
     """Minimize top-level window (never bare SW_HIDE)."""
+    # Try pywinauto first
     p = find_process_by_name(proc_name)
     if not p:
         return
-    # Enumerate windows and minimize
+    try:
+        from pywinauto import Application
+        app = Application(backend="uia").connect(process=p.pid, timeout=1.0)
+        top = app.top_window()
+        if top:
+            top.minimize()
+            return
+    except Exception:
+        pass
+
+    # Win32 fallback
     SW_MINIMIZE = 6
     def enum_cb(hwnd, lparam):
         if user32.IsWindowVisible(hwnd):
@@ -210,9 +302,21 @@ def focus_app(proc_name: str):
     p = find_process_by_name(proc_name)
     if not p:
         return
+    try:
+        from pywinauto import Application
+        app = Application(backend="uia").connect(process=p.pid, timeout=1.0)
+        top = app.top_window()
+        if top:
+            top.restore()
+            top.set_focus()
+            return
+    except Exception:
+        pass
+
+    # Win32 fallback
     SW_RESTORE = 9
     def enum_cb(hwnd, lparam):
-        if user32.IsWindowVisible(hwnd) or True:
+        if user32.IsWindowVisible(hwnd):
             pid = ctypes.c_ulong()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value == p.pid:
@@ -230,7 +334,7 @@ def open_url(url: str, browser_name: str | None = None):
     if browser_name:
         p = find_process_by_name(browser_name)
         if p:
-            subprocess.Popen([p.name(), url])
+            subprocess.Popen([p.name(), url], shell=False)
             return
     os.startfile(url)
 

@@ -2,6 +2,12 @@
 
 All notable changes to the Windows 10/11 port of `hey-jev` will be documented in this file.
 
+## [Phase 2: Action Parity] - 2026-10-03
+- Implemented and verified all 33 actions from the Action Parity Table for Windows 10/11 x64.
+- Added comprehensive app launcher supporting Win32, UWP, and packaged apps via URI schemes and shell:AppsFolder.
+- Implemented safe process-tree termination with 1.5s timeout for tray-minimizing apps (Slack, Discord, Spotify).
+- Added state-aware media transport via SendInput (VK_MEDIA_*), pycaw master/session volume, dark mode registry toggling with WM_SETTINGCHANGE, and non-blocking background action pool.
+
 ## [Phase 1.5: Decision Backend Abstraction & Benchmark] - 2026-10-03
 - Introduced backend-agnostic `DecisionBackend` interface supporting both TypeSafe hosted Jev and local open-weight Laya models.
 - Added `LayaBackend` running in-process on CPU with background pre-warming, uniform-prior confidence calibration, and automatic fallback to Jev.

@@ -265,8 +265,8 @@ def run_timer_action(action, text):
     return ("timer_none", {})
 
 ACTIONS = {
-    "app_open": lambda a: subprocess.Popen(["cmd", "/c", "start", "", APPS[a]]),
-    "app_quit": lambda a: actions_win.quit_app(APPS[a]),
+    "app_open": lambda a: actions_win.launch_app(APPS[a]),
+    "app_quit": lambda a: actions_win.run_async(actions_win.quit_app, APPS[a]),
     "app_hide": lambda a: actions_win.minimize_app(APPS[a]),
     "app_minimise": lambda a: actions_win.minimize_app(APPS[a]),
     "app_focus": lambda a: actions_win.focus_app(APPS[a]),
