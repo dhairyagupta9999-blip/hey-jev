@@ -48,21 +48,25 @@ HINTS = {
 SETTINGS_FILE = os.path.join(APPDATA_DIR, "settings.json")
 
 def load_settings() -> dict:
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {
+    defaults = {
         "mode": "ptt",
         "backend": os.getenv("HEYJEV_BACKEND", "jev"),
         "gate_jev": 0.65,
         "gate_laya": 0.45,
         "keep_on_top": False,
         "close_to_tray": True,
-        "ptt_key": "right alt"
+        "ptt_key": "right alt",
+        "stt_engine": os.getenv("HEYJEV_STT", "whisper"),
+        "whisper_model": os.getenv("HEYJEV_WHISPER_MODEL", "small.en")
     }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return {**defaults, **data}
+        except Exception:
+            pass
+    return defaults
 
 def save_settings(data: dict):
     try:
@@ -578,11 +582,18 @@ class MainWindow(QMainWindow):
         torch_ok = is_torch_available()
         laya_actually_active = (backend == "laya" and torch_ok)
 
+        stt_eng = self.settings.get("stt_engine", "whisper")
+        if stt_eng == "whistle":
+            stt_label = "local Whistle (Cactus Compute, fast on-device)"
+        else:
+            wm = self.settings.get("whisper_model", "small.en")
+            stt_label = f"local faster-whisper ({wm}, CPU int8)"
+
         if laya_actually_active:
             msg = (
                 "<b>Active Backend: Local Laya (100% On-Device)</b><br><br>"
-                "• <b>Audio Capture & Speech Recognition:</b> All audio stays 100% on your device, "
-                "transcribed in-process via local faster-whisper (small.en, CPU int8).<br>"
+                f"• <b>Audio Capture & Speech Recognition:</b> All audio stays 100% on your device, "
+                f"transcribed in-process via {stt_label}.<br>"
                 "• <b>Decision Engine:</b> Decisions are evaluated entirely on-device by the open-weight "
                 "Laya decision model running on CPU. <b>Zero command text or audio leaves your computer.</b><br>"
                 "• <b>Dictation:</b> Dictation is the ONLY feature that contacts a cloud endpoint "
@@ -595,15 +606,15 @@ class MainWindow(QMainWindow):
                 "• <b>Notice:</b> Laya requires PyTorch, which is not bundled in this build (source mode only).<br>"
                 "• <b>Decision Routing:</b> Command decisions route to TypeSafe Jev System 1 (~$0.00004 per turn). "
                 "<b>Decisions are NOT evaluated on-device because Laya is inactive.</b><br>"
-                "• <b>Local Audio Privacy:</b> Raw microphone audio NEVER leaves your machine. "
-                "faster-whisper converts speech to text locally on your CPU.<br>"
+                f"• <b>Local Audio Privacy:</b> Raw microphone audio NEVER leaves your machine. "
+                f"{stt_label} converts speech to text locally on your CPU.<br>"
                 "• <b>Dictation:</b> Dictation audio is sent only when explicitly requested."
             )
         else:
             msg = (
                 "<b>Active Backend: Jev (TypeSafe Hosted System 1)</b><br><br>"
-                "• <b>Local Audio Privacy:</b> Raw microphone audio NEVER leaves your machine. "
-                "faster-whisper converts speech to text locally on your CPU.<br>"
+                f"• <b>Local Audio Privacy:</b> Raw microphone audio NEVER leaves your machine. "
+                f"{stt_label} converts speech to text locally on your CPU.<br>"
                 "• <b>Decision Economics:</b> Only the transcribed text command is sent to the TypeSafe Jev API "
                 "using speculative fan-out (~$0.00004 per turn). No audio is transmitted.<br>"
                 "• <b>Factual Queries:</b> General knowledge queries route to Claude Haiku via OpenRouter.<br>"
@@ -655,6 +666,34 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(backend_group)
 
+        # STT Engine Group
+        stt_group = QGroupBox("Speech-to-Text (STT)")
+        stt_lay = QFormLayout(stt_group)
+
+        self.stt_combo = QComboBox()
+        self.stt_combo.addItem("faster-whisper (Default)", "whisper")
+        self.stt_combo.addItem("Whistle (Cactus Compute, fast on-device)", "whistle")
+        cur_stt = self.settings.get("stt_engine", "whisper")
+        self.stt_combo.setCurrentIndex(1 if cur_stt == "whistle" else 0)
+        self.stt_combo.currentIndexChanged.connect(self._on_stt_changed)
+        stt_lay.addRow("STT Engine:", self.stt_combo)
+
+        self.whisper_model_combo = QComboBox()
+        self.whisper_model_combo.addItem("small.en (Default, high accuracy)", "small.en")
+        self.whisper_model_combo.addItem("base.en (Balanced)", "base.en")
+        self.whisper_model_combo.addItem("tiny.en (Fastest)", "tiny.en")
+        cur_wm = self.settings.get("whisper_model", "small.en")
+        wm_idx = 0
+        if cur_wm == "base.en":
+            wm_idx = 1
+        elif cur_wm == "tiny.en":
+            wm_idx = 2
+        self.whisper_model_combo.setCurrentIndex(wm_idx)
+        self.whisper_model_combo.currentIndexChanged.connect(self._on_whisper_model_changed)
+        stt_lay.addRow("Whisper Model:", self.whisper_model_combo)
+
+        lay.addWidget(stt_group)
+
         # Hotkey Group
         hotkey_group = QGroupBox("Push-to-Talk & Hotkeys")
         hk_lay = QFormLayout(hotkey_group)
@@ -701,6 +740,24 @@ class MainWindow(QMainWindow):
         os.environ["HEYJEV_BACKEND"] = val
         self.gate_spin.setValue(self.settings.get("gate_laya" if val == "laya" else "gate_jev", 0.65 if val == "jev" else 0.45))
         save_settings(self.settings)
+        self._update_privacy_text()
+
+    def _on_stt_changed(self, idx: int):
+        val = self.stt_combo.itemData(idx)
+        self.settings["stt_engine"] = val
+        os.environ["HEYJEV_STT"] = val
+        save_settings(self.settings)
+        import stt
+        stt.get_stt_backend(val, self.settings.get("whisper_model", "small.en"))
+        self._update_privacy_text()
+
+    def _on_whisper_model_changed(self, idx: int):
+        val = self.whisper_model_combo.itemData(idx)
+        self.settings["whisper_model"] = val
+        os.environ["HEYJEV_WHISPER_MODEL"] = val
+        save_settings(self.settings)
+        import stt
+        stt.get_stt_backend(self.settings.get("stt_engine", "whisper"), val)
         self._update_privacy_text()
 
     def _on_gate_changed(self, val: float):

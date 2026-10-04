@@ -39,6 +39,7 @@ if not os.path.exists(USER_VOCAB_FILE) and os.path.exists(DEFAULT_VOCAB_FILE):
 # Audio and recognition defaults
 SAMPLE_RATE = 16000
 WHISPER_MODEL = "small.en"
+DEFAULT_STT_ENGINE = "whisper"
 DEFAULT_GATE = 0.65
 COMMAND_PROMPT = "Open Spotify. Set a timer for five minutes. Play. Pause. Next track. Turn Spotify down. Turn the volume down. Mute. Dark mode on. Lock the screen."
 WAKE_PROMPT = None

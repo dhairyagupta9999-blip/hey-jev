@@ -95,6 +95,35 @@ def test_stt_trim_silence_and_threads():
     assert len(trimmed) < len(audio)
     assert len(trimmed) >= len(tone)
 
+def test_stt_backend_resolution_and_fallback():
+    import stt
+    # 1. FasterWhisperBackend resolution
+    bw = stt.get_stt_backend(engine="whisper", whisper_model="tiny.en")
+    assert isinstance(bw, stt.FasterWhisperBackend)
+    assert bw.model_size == "tiny.en"
+
+    # 2. WhistleBackend resolution & keywords
+    bwh = stt.get_stt_backend(engine="whistle", whisper_model="tiny.en")
+    assert isinstance(bwh, stt.WhistleBackend)
+    kws = bwh.get_keywords()
+    assert "Jev" in kws
+    assert "Hey Jev" in kws
+
+    # 3. Whistle fallback when engine is uninitialized/fails
+    bwh._needle = None
+    import numpy as np
+    text, lat = bwh.transcribe(np.zeros(16000, dtype=np.float32))
+    assert isinstance(text, str)
+    assert isinstance(lat, int)
+
+def test_stt_benchmark_normalization_and_matching():
+    import benchmark_stt
+    assert benchmark_stt.normalize_text("Open Spotify.") == "open spotify"
+    assert benchmark_stt.normalize_text("  HEY JEV, Dark Mode on!  ") == "hey jev dark mode on"
+    assert benchmark_stt.is_exact_match("open Spotify.", "open spotify")
+    assert benchmark_stt.is_exact_match("who wrote hamlet", "Who wrote Hamlet?")
+    assert not benchmark_stt.is_exact_match("open slack", "open spotify")
+
 if __name__ == "__main__":
     print("Running Phase 1 validation tests...")
     test_paths_and_appdata()
@@ -109,4 +138,11 @@ if __name__ == "__main__":
     print("  [PASS] Trace logging to Hey Jev.log")
     test_volume_actions()
     print("  [PASS] Windows volume endpoint via pycaw")
+    test_stt_trim_silence_and_threads()
+    print("  [PASS] STT silence trimming and CPU thread limit")
+    test_stt_backend_resolution_and_fallback()
+    print("  [PASS] STT backend resolution and Whistle fallback")
+    test_stt_benchmark_normalization_and_matching()
+    print("  [PASS] STT benchmark normalization and matching")
     print("\nALL PHASE 1 TESTS PASSED!")
+
