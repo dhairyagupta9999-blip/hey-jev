@@ -57,7 +57,11 @@ def load_settings() -> dict:
         "close_to_tray": True,
         "ptt_key": "right alt",
         "stt_engine": os.getenv("HEYJEV_STT", "whisper"),
-        "whisper_model": os.getenv("HEYJEV_WHISPER_MODEL", "small.en")
+        "whisper_model": os.getenv("HEYJEV_WHISPER_MODEL", "small.en"),
+        "tier3_enabled": False,
+        "tier3_provider": "openrouter",
+        "tier3_daily_spend_cap": 0.10,
+        "tier3_always_confirm": ["delete_file", "run_powershell", "close_all", "shutdown_computer", "open_dangerous_file"]
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -67,6 +71,8 @@ def load_settings() -> dict:
         except Exception:
             pass
     return defaults
+
+get_settings = load_settings
 
 def save_settings(data: dict):
     try:
