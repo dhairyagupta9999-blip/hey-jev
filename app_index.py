@@ -164,10 +164,11 @@ class AppIndex:
             seen_targets.add(info["target"].lower())
 
         # 3. Store / UWP Apps (Priority 50)
+        store_scanned = False
         try:
             p = subprocess.run(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "Get-StartApps | ConvertTo-Csv -NoTypeInformation"],
-                capture_output=True, text=True, timeout=8
+                capture_output=True, text=True, timeout=15
             )
             if p.returncode == 0 and p.stdout:
                 reader = csv.DictReader(io.StringIO(p.stdout))
@@ -188,8 +189,23 @@ class AppIndex:
                         "aliases": [clean_name(name)],
                         "priority": 50
                     })
+                store_scanned = True
         except Exception as exc:
             print(f"  [app_index] Warning: Get-StartApps scan failed: {exc}")
+
+        # Fallback to cache if Get-StartApps timed out and cache has store_app entries
+        if not store_scanned and os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                for item in cached:
+                    if item.get("source") == "store_app" and item.get("app_id"):
+                        app_id = item["app_id"]
+                        if app_id.lower() not in seen_targets:
+                            seen_targets.add(app_id.lower())
+                            new_apps.append(item)
+            except Exception:
+                pass
 
         # 4. Start Menu Shortcuts (.lnk) (Priority 50)
         start_menu_dirs = [

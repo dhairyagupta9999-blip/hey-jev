@@ -53,7 +53,8 @@ def parse_file_query(text: str) -> Dict[str, Any]:
     """Parse a file request into name keywords, extension types, and date filters."""
     t = text.lower().strip()
     # Strip leading phrases like "open my", "open the", "find", "show me"
-    t = re.sub(r"^(?:open|find|show\s+me|get|locate)\s+(?:my\s+|the\s+|a\s+|an\s+)?", "", t).strip()
+    t = re.sub(r"^(?:open|find|show\s+me|get|locate)\s+", "", t).strip()
+    t = re.sub(r"^(?:my|the|a|an)\s+", "", t).strip()
 
     date_filter: Optional[Tuple[float, float]] = None
     now = datetime.now()
@@ -81,7 +82,7 @@ def parse_file_query(text: str) -> Dict[str, Any]:
             t = re.sub(rf"\b{type_word}\b", "", t).strip()
 
     # Clean leftover modifiers
-    t = re.sub(r"\b(?:last|latest|recent|file|document|i\s+downloaded)\b", "", t).strip()
+    t = re.sub(r"\b(?:last|latest|recent|file|document|i\s+downloaded|my|the|a|an)\b", "", t).strip()
     keywords = [w for w in re.split(r"\s+", t) if w]
 
     return {
@@ -143,7 +144,13 @@ def search_local_fallback(parsed: Dict[str, Any], scan_dirs: Optional[List[str]]
         if not os.path.exists(d):
             continue
         try:
-            for root, _, files in os.walk(d):
+            for root, subdirs, files in os.walk(d):
+                # Prune deep dependency and hidden directories for performance
+                subdirs[:] = [
+                    s for s in subdirs
+                    if not s.startswith(".")
+                    and s.lower() not in ("node_modules", "venv", ".venv", "__pycache__", "site-packages", "appdata")
+                ]
                 for f in files:
                     ext = os.path.splitext(f)[1].lower()
                     if parsed["extensions"] and ext not in parsed["extensions"]:

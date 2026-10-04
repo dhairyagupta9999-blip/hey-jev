@@ -440,5 +440,170 @@ class TestPhase6cSafetyAndAudit(unittest.TestCase):
         self.assertEqual(len(executed), 0)
 
 
+class TestPhase6VoiceLoopIntegration(unittest.TestCase):
+    """End-to-end voice loop routing and safety engine gating tests (Step 1)."""
+
+    def setUp(self):
+        import safety_engine
+        cm = safety_engine.get_confirmation_manager()
+        cm.cancel_pending("test setup")
+
+    def test_01_eight_test_phrases_routing(self):
+        """Verify is_tier2_direct_match routes the 8 phrases directly to Tier 2."""
+        import siri
+        phrases = [
+            ("open Notepad", True),
+            ("open Calculator", True),
+            ("close Notepad", True),
+            ("open the Downloads folder", True),
+            ("open my resume", True),
+            ("open Bluetooth settings", True),
+            ("open Task Manager", True),
+            ("snap Chrome to the left", True),
+            # Tier 1 battery phrases route to Tier 1 first
+            ("open Spotify", False),
+            ("close Slack", False),
+        ]
+        for phrase, should_direct in phrases:
+            matched = siri.is_tier2_direct_match(phrase)
+            self.assertEqual(
+                matched, should_direct,
+                f"Phrase '{phrase}' direct match expected {should_direct}, got {matched}"
+            )
+
+    def test_02_handle_open_and_close_notepad(self):
+        """'open Notepad' and 'close Notepad' run end-to-end via siri.handle."""
+        import siri
+        import safety_engine
+        spoken = []
+
+        def mock_say(line, notify=None):
+            spoken.append(line)
+
+        with patch("siri.say", side_effect=mock_say):
+            with patch("app_index.AppIndex.launch_app", return_value=True) as mock_launch:
+                siri.handle("open Notepad")
+                self.assertTrue(mock_launch.called)
+                self.assertTrue(any("opening" in s.lower() or "here" in s.lower() or "there" in s.lower() for s in spoken))
+
+            spoken.clear()
+            with patch("app_index.AppIndex.close_app", return_value={"success": True, "matched_processes": 1}):
+                siri.handle("close Notepad")
+                self.assertTrue(any("notepad" in s.lower() for s in spoken))
+
+    def test_03_handle_open_calculator(self):
+        """'open Calculator' runs via siri.handle."""
+        import siri
+        spoken = []
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("app_index.AppIndex.launch_app", return_value=True) as mock_launch:
+                siri.handle("open Calculator")
+                self.assertTrue(mock_launch.called)
+                self.assertTrue(len(spoken) > 0)
+
+    def test_04_handle_downloads_folder(self):
+        """'open the Downloads folder' routes and opens user folder."""
+        import siri
+        spoken = []
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("os.startfile") as mock_start:
+                siri.handle("open the Downloads folder")
+                self.assertTrue(mock_start.called)
+                self.assertTrue(any("downloads" in s.lower() for s in spoken))
+
+    def test_05_handle_open_resume(self):
+        """'open my resume' finds and opens resume file."""
+        import siri
+        spoken = []
+        mock_file = [{"name": "my_resume.pdf", "path": "C:\\fake\\my_resume.pdf", "ext": ".pdf", "is_dangerous": False, "date_modified": 100}]
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("file_finder.find_files", return_value=mock_file):
+                with patch("os.startfile"):
+                    siri.handle("open my resume")
+                    self.assertTrue(any("my_resume" in s.lower() for s in spoken))
+
+    def test_06_handle_bluetooth_and_taskmgr(self):
+        """'open Bluetooth settings' and 'open Task Manager' execute via siri.handle."""
+        import siri
+        spoken = []
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("os.startfile") as mock_start:
+                siri.handle("open Bluetooth settings")
+                self.assertTrue(mock_start.called)
+                self.assertTrue(any("bluetooth" in s.lower() for s in spoken))
+
+            spoken.clear()
+            with patch("subprocess.Popen") as mock_popen:
+                siri.handle("open Task Manager")
+                self.assertTrue(mock_popen.called)
+                self.assertTrue(any("task manager" in s.lower() for s in spoken))
+
+    def test_07_handle_snap_chrome(self):
+        """'snap Chrome to the left' executes window manager snapping."""
+        import siri
+        spoken = []
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("window_manager.snap_window", return_value=True) as mock_snap:
+                siri.handle("snap Chrome to the left")
+                mock_snap.assert_called_with("Chrome", "left")
+                self.assertTrue(any("snapped" in s.lower() for s in spoken))
+
+    def test_08_confirmation_flow_and_stop_in_voice_loop(self):
+        """High-risk action prompts confirmation, then 'yes' executes, or 'stop' cancels."""
+        import siri
+        import safety_engine
+        cm = safety_engine.get_confirmation_manager()
+        spoken = []
+
+        executed = []
+        def _target_action():
+            executed.append(True)
+
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            # 1. Trigger high risk confirmation
+            cm.request_high_risk_confirmation("close_all", "Close all windows?", _target_action, timeout_s=5.0)
+            self.assertIsNotNone(cm.pending_confirmation)
+
+            # 2. User says 'yes'
+            siri.handle("yes")
+            self.assertEqual(len(executed), 1)
+            self.assertIsNone(cm.pending_confirmation)
+
+            # 3. Trigger again and user says 'stop'
+            executed.clear()
+            cm.request_high_risk_confirmation("close_all", "Close all windows?", _target_action, timeout_s=5.0)
+            siri.handle("stop")
+            self.assertEqual(len(executed), 0)
+            self.assertIsNone(cm.pending_confirmation)
+
+    def test_09_undo_command_in_voice_loop(self):
+        """'undo that' in voice loop triggers perform_undo."""
+        import siri
+        import safety_engine
+
+        # Record a reversible action
+        safety_engine.log_action(
+            tier=2,
+            action="close_app",
+            args={"target": "Notepad"},
+            risk_level=safety_engine.MEDIUM,
+            result="success",
+            undoable=True,
+            undo_data={"action": "open_app", "target": "Notepad"}
+        )
+
+        spoken = []
+        with patch("siri.say", side_effect=lambda line, notify=None: spoken.append(line)):
+            with patch("app_index.AppIndex.launch_app", return_value=True) as mock_launch:
+                siri.handle("undo that")
+                self.assertTrue(mock_launch.called)
+                self.assertTrue(any("reopening notepad" in s.lower() for s in spoken))
+
+
 if __name__ == "__main__":
     unittest.main()

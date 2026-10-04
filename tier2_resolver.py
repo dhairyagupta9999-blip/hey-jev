@@ -26,6 +26,7 @@ import window_manager
 import actions_win
 from tts import say_line
 import logger
+import safety_engine
 
 
 def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
@@ -39,6 +40,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
     win_res = window_manager.resolve_window_command(text)
     if win_res:
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        safety_engine.log_action(2, f"window_{win_res['action']}", {"target": win_res["target"]}, safety_engine.SAFE, "success" if win_res["success"] else "failed")
         logger.trace_line(f"  [tier 2: window_manager] {latency_ms}ms  $0.000000  action: {win_res['action']} on {win_res['target']}")
         return {
             "tier": 2,
@@ -53,6 +55,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
     sys_res = system_targets.resolve_system_target(text)
     if sys_res:
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        safety_engine.log_action(2, f"system_{sys_res['type']}", {"target": sys_res["label"]}, safety_engine.SAFE, "success")
         logger.trace_line(f"  [tier 2: system_target] {latency_ms}ms  $0.000000  type: {sys_res['type']} -> {sys_res['label']}")
         return {
             "tier": 2,
@@ -74,6 +77,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
     if action == "refresh_apps":
         count = refresh_apps()
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        safety_engine.log_action(2, "refresh_apps", {"count": count}, safety_engine.SAFE, "success")
         line = f"Refreshed app index, found {count} applications."
         logger.trace_line(f"  [tier 2: app_index] {latency_ms}ms  $0.000000  action: refresh_apps")
         return {"tier": 2, "status": "done", "action": "refresh_apps", "line": line, "latency_ms": latency_ms}
@@ -87,10 +91,11 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
             "tier": 2,
             "status": "needs_confirmation",
             "action": "close_all",
-            "risk_level": "MEDIUM",
+            "risk_level": "HIGH",
             "message": res["message"],
             "line": res["message"],
-            "latency_ms": latency_ms
+            "latency_ms": latency_ms,
+            "execute_fn": lambda: (idx.close_all_apps(confirmed=True), safety_engine.log_action(2, "close_all", {}, safety_engine.HIGH, "success"))
         }
 
     # 3. Open / launch request
@@ -99,6 +104,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
         sys_sub = system_targets.resolve_system_target(target)
         if sys_sub:
             latency_ms = int((time.perf_counter() - t0) * 1000)
+            safety_engine.log_action(2, f"system_{sys_sub['type']}", {"target": sys_sub["label"]}, safety_engine.SAFE, "success")
             logger.trace_line(f"  [tier 2: system_target] {latency_ms}ms  $0.000000  type: {sys_sub['type']} -> {sys_sub['label']}")
             return {
                 "tier": 2,
@@ -132,6 +138,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
             success = idx.launch_app(app_entry)
             display_name = app_entry["name"]
             line = say_line("app_open", app=display_name)
+            safety_engine.log_action(2, "open_app", {"app": display_name}, safety_engine.SAFE, "success" if success else "failed")
             logger.trace_line(f"  [tier 2: app_index] {latency_ms}ms  $0.000000  launch: {display_name} (score {score:.1f})")
             return {
                 "tier": 2,
@@ -160,16 +167,19 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
                         "path": file_info["path"],
                         "message": res_open["message"],
                         "line": res_open["message"],
-                        "latency_ms": latency_ms
+                        "latency_ms": latency_ms,
+                        "execute_fn": lambda: (file_finder.open_file_safe(file_info["path"], confirmed=True), safety_engine.log_action(2, "open_file", {"path": file_info["path"]}, safety_engine.HIGH, "success"))
                     }
                 else:
+                    safety_engine.log_action(2, "open_file", {"path": file_info["path"]}, safety_engine.SAFE, "success" if res_open.get("success") else "failed")
                     logger.trace_line(f"  [tier 2: file_finder] {latency_ms}ms  $0.000000  open file: {file_info['name']}")
+                    line = res_open.get("line") or res_open.get("error") or f"Opening {file_info['name']}."
                     return {
                         "tier": 2,
-                        "status": "done",
+                        "status": "done" if res_open.get("success") else "failed",
                         "action": "open_file",
                         "path": file_info["path"],
-                        "line": res_open["line"],
+                        "line": line,
                         "latency_ms": latency_ms
                     }
             else:
@@ -187,6 +197,18 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
                     "line": msg,
                     "latency_ms": latency_ms
                 }
+        elif any(w in target.lower() for w in ("file", "document", "resume", "pdf", "docx", "notes", "my ")) or "." in target:
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            line = f"Couldn't find any file matching '{target}'."
+            logger.trace_line(f"  [tier 2: file_finder] {latency_ms}ms  $0.000000  not found: {target}")
+            return {
+                "tier": 2,
+                "status": "not_found",
+                "action": "find_files",
+                "target": target,
+                "line": line,
+                "latency_ms": latency_ms
+            }
 
     # 4. Close / quit application
     if action == "close" and target:
@@ -194,7 +216,20 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         if res.get("success"):
             line = say_line("app_quit", app=target)
+            safety_engine.log_action(2, "close_app", {"target": target}, safety_engine.MEDIUM, "success", undoable=True, undo_data={"action": "open_app", "target": target})
             logger.trace_line(f"  [tier 2: app_control] {latency_ms}ms  $0.000000  closed: {target} (procs: {res.get('matched_processes')})")
+            return {
+                "tier": 2,
+                "status": "done",
+                "action": "app_quit",
+                "app": target,
+                "line": line,
+                "latency_ms": latency_ms
+            }
+        else:
+            line = f"{target} is not open."
+            safety_engine.log_action(2, "close_app", {"target": target}, safety_engine.MEDIUM, "not_running")
+            logger.trace_line(f"  [tier 2: app_control] {latency_ms}ms  $0.000000  not running: {target}")
             return {
                 "tier": 2,
                 "status": "done",
@@ -210,6 +245,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
         if window_manager.focus_window(target):
             latency_ms = int((time.perf_counter() - t0) * 1000)
             line = say_line("app_focus", app=target)
+            safety_engine.log_action(2, "app_focus", {"target": target}, safety_engine.SAFE, "success")
             logger.trace_line(f"  [tier 2: window_manager] {latency_ms}ms  $0.000000  focus: {target}")
             return {
                 "tier": 2,
@@ -226,6 +262,7 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
             proc_target = app_entry.get("process") or app_entry["name"]
             actions_win.focus_app(proc_target)
             line = say_line("app_focus", app=app_entry["name"])
+            safety_engine.log_action(2, "app_focus", {"target": app_entry["name"]}, safety_engine.SAFE, "success")
             logger.trace_line(f"  [tier 2: app_control] {latency_ms}ms  $0.000000  focus: {app_entry['name']}")
             return {
                 "tier": 2,

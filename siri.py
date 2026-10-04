@@ -313,8 +313,74 @@ def emit(notify, state, detail=""):
 def say(line, notify=None):
     trace_say(line)
     emit(notify, "Speaking", line)
-    tts_ms = speak(line)
-    trace_fish(tts_ms)
+    try:
+        tts_ms = speak(line)
+        trace_fish(tts_ms)
+    except Exception:
+        pass
+
+def is_tier2_direct_match(text: str) -> bool:
+    """Check if transcript matches open/close/switch/find/window/system targets
+    with a target that Jev's fixed battery cannot resolve.
+    """
+    import window_manager
+    import system_targets
+    import target_extractor
+
+    t = text.strip()
+
+    # 1. Target extraction: if it's an app in APPS or HEARD_AS, Jev handles it (Tier 1)
+    action, target = target_extractor.extract_target(t)
+    if action in ("open", "close", "focus") and target:
+        tgt_lower = target.lower()
+        if tgt_lower in APPS:
+            return False
+        for rx, _ in HEARD_AS:
+            if rx.search(tgt_lower):
+                return False
+
+    # 2. Window management commands (snap left/right, minimize, maximize, restore)
+    if window_manager.WINDOW_ACTION_REGEX.match(t) or window_manager.SNAP_REGEX.match(t):
+        return True
+
+    # 3. System targets (settings URIs, folders, administrative tools, direct URLs)
+    sys_res = system_targets.resolve_system_target(t)
+    if sys_res:
+        # Exclude if it resolved to a known site that is an app in APPS (e.g. spotify)
+        if sys_res.get("type") == "website" and sys_res.get("label", "").lower() in APPS:
+            return False
+        return True
+
+    # 4. Special commands: close_all, refresh_apps
+    if action in ("close_all", "refresh_apps"):
+        return True
+
+    # 5. Open/close/focus with a target not in APPS
+    if action and target:
+        return True
+
+    return False
+
+def handle_tier2_result(t2_res, notify=None):
+    global misses
+    misses = 0
+    status = t2_res.get("status")
+
+    if status == "needs_confirmation":
+        from safety_engine import get_confirmation_manager
+        cm = get_confirmation_manager()
+        action = t2_res.get("action", "unknown")
+        message = t2_res.get("message", "This action requires confirmation.")
+        exec_fn = t2_res.get("execute_fn", lambda: None)
+        cm.request_high_risk_confirmation(action, message, exec_fn, timeout_s=8.0)
+        say(message, notify)
+        emit(notify, "Awaiting confirmation", message)
+        return
+
+    line = t2_res.get("line") or t2_res.get("message", "")
+    if line:
+        say(line, notify)
+        emit(notify, "Ready", line)
 
 def handle(text, stt_ms=None, notify=None, quiet=False):
     global misses
@@ -327,6 +393,44 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
     if not text.strip():
         emit(notify, "Ready", "Didn't catch anything")
         return
+
+    t_clean = text.lower().strip()
+
+    # 1. Safety Hook: Stop / cancel commands
+    if t_clean in ("stop", "cancel", "halt", "abort"):
+        from safety_engine import get_confirmation_manager
+        cm = get_confirmation_manager()
+        cancelled, msg = cm.cancel_pending("user said stop")
+        line = msg if cancelled else "Stopped."
+        say(line, notify)
+        emit(notify, "Ready", line)
+        return
+
+    # 2. Safety Hook: Undo command
+    if t_clean in ("undo", "undo that", "undo previous action", "revert"):
+        from safety_engine import perform_undo
+        ok, msg = perform_undo()
+        say(msg, notify)
+        emit(notify, "Ready", msg)
+        return
+
+    # 3. Safety Hook: User response to in-flight confirmation
+    from safety_engine import get_confirmation_manager
+    cm = get_confirmation_manager()
+    if cm.pending_confirmation:
+        handled, msg = cm.respond(text)
+        if handled:
+            say(msg, notify)
+            emit(notify, "Ready", msg)
+            return
+
+    # 4. Direct Tier 2 Routing for open-vocabulary targets outside Jev's battery
+    if is_tier2_direct_match(text):
+        from tier2_resolver import resolve_tier2
+        t2_res = resolve_tier2(text)
+        if t2_res is not None:
+            handle_tier2_result(t2_res, notify)
+            return
 
     emit(notify, "Thinking", text)
     backend = get_backend()
@@ -348,7 +452,7 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         payload = split_actions(text, ans)
         kind = "actions" if payload else "clarify"
 
-    # Tier 2 open-vocabulary resolution (App Index, process control, etc.)
+    # Tier 2 fallback resolution if Tier 1 gates didn't pass or returned app: none
     t2_applicable = (kind == "clarify") or (
         kind == "actions" and any(p[1].startswith("app_") and p[2] == "none" for p in payload)
     )
@@ -356,12 +460,29 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         from tier2_resolver import resolve_tier2
         t2_res = resolve_tier2(text)
         if t2_res is not None:
-            misses = 0
-            line = t2_res.get("line") or t2_res.get("message", "")
-            if line:
-                say(line, notify)
-                emit(notify, "Ready", line)
+            handle_tier2_result(t2_res, notify)
             return
+
+    # Tier 3 (AI Agent) hook if enabled
+    try:
+        from assistant_ui import get_settings
+        tier3_enabled = get_settings().get("tier3_enabled", False)
+    except Exception:
+        tier3_enabled = False
+
+    if tier3_enabled and (kind == "clarify" or kind == "unclear"):
+        try:
+            import tier3_agent
+            t3_res = tier3_agent.run_tier3_agent(text)
+            if t3_res is not None:
+                misses = 0
+                line = t3_res.get("line") or t3_res.get("message", "")
+                if line:
+                    say(line, notify)
+                    emit(notify, "Ready", line)
+                return
+        except Exception as exc:
+            print(f"  [tier 3 error]: {exc}")
 
     if kind == "clarify" and quiet:
         emit(notify, "Ready", "Didn't catch that")
