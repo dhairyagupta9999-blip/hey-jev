@@ -15,3 +15,5 @@ vocabulary.json
 timers.json
 settings.json
 test_clips/
+benchmark_stt_results.json
+test_cache.json

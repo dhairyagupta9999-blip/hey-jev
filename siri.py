@@ -366,6 +366,21 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         payload = split_actions(text, ans)
         kind = "actions" if payload else "clarify"
 
+    # Tier 2 open-vocabulary resolution (App Index, process control, etc.)
+    t2_applicable = (kind == "clarify") or (
+        kind == "actions" and any(p[1].startswith("app_") and p[2] == "none" for p in payload)
+    )
+    if t2_applicable:
+        from tier2_resolver import resolve_tier2
+        t2_res = resolve_tier2(text)
+        if t2_res is not None:
+            misses = 0
+            line = t2_res.get("line") or t2_res.get("message", "")
+            if line:
+                say(line, notify)
+                emit(notify, "Ready", line)
+            return
+
     if kind == "clarify" and quiet:
         emit(notify, "Ready", "Didn't catch that")
         return
