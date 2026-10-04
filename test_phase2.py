@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 import actions_win
-from siri import ACTIONS, run_browser_action, run_timer_action
+from siri import ACTIONS, run_browser_action, run_timer_action, handle, KNOWN_SITES
 
 class TestPhase2ActionParity(unittest.TestCase):
 
@@ -125,6 +125,65 @@ class TestPhase2ActionParity(unittest.TestCase):
         future = actions_win.run_async(work)
         future.result(timeout=1.0)
         self.assertTrue(ran[0])
+
+    @patch("actions_win.open_url")
+    def test_known_sites_navigation_without_com(self, mock_open_url):
+        """Verify known sites without .com open corresponding URLs directly."""
+        # 1. YouTube
+        action, ctx = run_browser_action("browser_open", "chrome", "open youtube")
+        self.assertEqual(action, "browser_open_site")
+        self.assertEqual(ctx.get("site"), "youtube")
+        mock_open_url.assert_called_with(KNOWN_SITES["youtube"], "chrome")
+
+        # 2. Reddit
+        mock_open_url.reset_mock()
+        action, ctx = run_browser_action("browser_open", "edge", "go to reddit")
+        self.assertEqual(action, "browser_open_site")
+        self.assertEqual(ctx.get("site"), "reddit")
+        mock_open_url.assert_called_with(KNOWN_SITES["reddit"], "edge")
+
+        # 3. GitHub
+        mock_open_url.reset_mock()
+        action, ctx = run_browser_action("browser_open", "firefox", "open github")
+        self.assertEqual(action, "browser_open_site")
+        self.assertEqual(ctx.get("site"), "github")
+        mock_open_url.assert_called_with(KNOWN_SITES["github"], "firefox")
+
+        # 4. Gmail
+        mock_open_url.reset_mock()
+        action, ctx = run_browser_action("browser_open", "chrome", "open my gmail")
+        self.assertEqual(action, "browser_open_site")
+        self.assertEqual(ctx.get("site"), "gmail")
+        mock_open_url.assert_called_with(KNOWN_SITES["gmail"], "chrome")
+
+        # 5. Unknown site without extension returns browser_no_site
+        action, ctx = run_browser_action("browser_open", "chrome", "open foobarxyzsite")
+        self.assertEqual(action, "browser_no_site")
+
+    @patch("siri.speak", return_value=120)
+    @patch("siri.ask_llm", return_value=("William Shakespeare wrote Hamlet.", 450, 0.0001))
+    @patch("siri.jev")
+    def test_information_request_turn_with_mocked_openrouter(self, mock_jev, mock_ask_llm, mock_speak):
+        """Verify information_request turn runs ask_llm and trace_line without NameError."""
+        # Mock Jev decision to classify as information_request
+        mock_jev.return_value = {
+            "category": ("information_request", 0.98),
+            "compound": (False, 0.99),
+            "target": ("none", 0.1),
+            "app": ("none", 0.0),
+            "app_action": ("none", 0.0),
+            "volume_action": ("none", 0.0),
+            "display_action": ("none", 0.0),
+            "media_action": ("none", 0.0),
+            "timer_action": ("none", 0.0),
+            "system_action": ("none", 0.0),
+            "browser_action": ("none", 0.0),
+        }
+        # Run handle turn
+        handle("Who wrote Hamlet?", stt_ms=150, notify=None)
+
+        mock_ask_llm.assert_called_once_with("Who wrote Hamlet?")
+        mock_speak.assert_called_once_with("William Shakespeare wrote Hamlet.")
 
 if __name__ == "__main__":
     unittest.main()

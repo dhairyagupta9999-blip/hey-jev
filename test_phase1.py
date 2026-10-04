@@ -81,6 +81,20 @@ def test_volume_actions():
     assert isinstance(vol, int)
     assert 0 <= vol <= 100
 
+def test_stt_trim_silence_and_threads():
+    import stt
+    import numpy as np
+    threads = stt.get_cpu_threads()
+    assert 1 <= threads <= 4
+
+    sr = 16000
+    t = np.linspace(0, 0.5, int(sr * 0.5), dtype=np.float32)
+    tone = 0.5 * np.sin(2 * np.pi * 440 * t)
+    audio = np.concatenate([np.zeros(sr, dtype=np.float32), tone, np.zeros(sr, dtype=np.float32)])
+    trimmed = stt.trim_silence(audio)
+    assert len(trimmed) < len(audio)
+    assert len(trimmed) >= len(tone)
+
 if __name__ == "__main__":
     print("Running Phase 1 validation tests...")
     test_paths_and_appdata()

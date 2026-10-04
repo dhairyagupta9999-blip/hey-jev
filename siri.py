@@ -25,14 +25,14 @@ from config import (
 from secrets_store import get_secret
 from dictation import Dictation, START as DICTATE_START, paste
 from audio_io import Recorder, play_audio, play_chime
-from stt import transcribe_audio
+from stt import transcribe_audio, warmup_whisper
 from tts import speak, fetch_tts, warm_cache, say_line, REPLIES, LEVELS
 from timers import (
     parse_duration, parse_reminder, say_duration, short_duration,
     add_timer, timer_snapshot, cancel_timer, start_timer_loop, load_persisted_timers
 )
 from logger import (
-    trace_heard, trace_fixed, trace_answers, trace_decision, trace_split_call,
+    trace_line, trace_heard, trace_fixed, trace_answers, trace_decision, trace_split_call,
     trace_action, trace_say, trace_fish
 )
 import actions_win
@@ -232,6 +232,25 @@ def ask_llm(text):
     return reply, latency_ms, cost
 
 # --------------------------------------------------------------------------- Windows Actions Mapping
+KNOWN_SITES = {
+    "youtube": "https://www.youtube.com",
+    "github": "https://github.com",
+    "gmail": "https://mail.google.com",
+    "reddit": "https://www.reddit.com",
+    "twitter": "https://twitter.com",
+    "x": "https://x.com",
+    "google": "https://www.google.com",
+    "wikipedia": "https://www.wikipedia.org",
+    "netflix": "https://www.netflix.com",
+    "spotify": "https://open.spotify.com",
+    "amazon": "https://www.amazon.com",
+    "twitch": "https://www.twitch.tv",
+    "discord": "https://discord.com",
+    "linkedin": "https://www.linkedin.com",
+    "facebook": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com",
+}
+
 def run_browser_action(action, key, text):
     if action == "browser_new_tab":
         actions_win.browser_new_tab(key)
@@ -244,6 +263,11 @@ def run_browser_action(action, key, text):
         actions_win.open_url(url, key)
         site_name = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
         return "browser_open_site", {"site": site_name}
+    # Check known sites by name without domain extension
+    for site, url in KNOWN_SITES.items():
+        if re.search(rf"\b{re.escape(site)}\b", t, re.I):
+            actions_win.open_url(url, key)
+            return "browser_open_site", {"site": site}
     return "browser_no_site", {}
 
 def run_timer_action(action, text):
@@ -400,6 +424,7 @@ def ready_text(wake):
 def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_backend="whisper", wake_model=None):
     print("loading whisper...")
     emit(notify, "Starting", "Loading Whisper\u2026")
+    warmup_whisper()
     rec = Recorder(mic)
     busy = threading.Lock()
     armed_until = [0.0]
@@ -467,7 +492,9 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
     def ptt_turn(audio):
         emit(notify, "Transcribing", "Working out what you said\u2026")
         try:
+            audio_secs = len(audio) / float(SAMPLE_RATE) if len(audio) else 0.0
             text, ms = transcribe(audio, COMMAND_PROMPT)
+            print(f"  [stt] {ms}ms ({audio_secs:.2f}s audio)")
         except Exception as exc:
             emit(notify, "Something went wrong", str(exc))
             return
@@ -509,13 +536,17 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
                 return
             elif armed_until[0] and time.time() < armed_until[0]:
                 armed_until[0] = 0
+                audio_secs = len(audio) / float(SAMPLE_RATE) if len(audio) else 0.0
                 text, ms = transcribe(audio, COMMAND_PROMPT, drop_noise=True)
+                print(f"  [stt] {ms}ms ({audio_secs:.2f}s audio)")
                 if text.strip():
                     run_turn(text, ms, quiet=True)
                 return
             return
 
+        audio_secs = len(audio) / float(SAMPLE_RATE) if len(audio) else 0.0
         text, ms = transcribe(audio, WAKE_PROMPT, drop_noise=True)
+        print(f"  [stt] {ms}ms ({audio_secs:.2f}s audio)")
         m = wake_detector.detect_utterance(text)
         if m:
             print(f"\n  (wake: {text!r})")
