@@ -208,28 +208,10 @@ def split_actions(text, ans):
 LLM_MODEL = "anthropic/claude-haiku-4.5"
 
 def ask_llm(text):
-    t0 = time.time()
-    r = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OR_KEY}"},
-        json={
-            "model": LLM_MODEL,
-            "max_tokens": 80,
-            "usage": {"include": True},
-            "messages": [
-                {"role": "system", "content": "You are a voice assistant. Answer in one short spoken sentence, no markdown. "
-                                              "You may start with exactly one tag from: [chuckling] [laughing] [sighing] [cheerful], or none."},
-                {"role": "user", "content": text}
-            ]
-        },
-        timeout=30
-    )
-    r.raise_for_status()
-    data = r.json()
-    reply = data["choices"][0]["message"]["content"].strip()
-    latency_ms = int((time.time() - t0) * 1000)
-    cost = data.get("usage", {}).get("cost", 0.0)
-    return reply, latency_ms, cost
+    """Answer questions using configured answer provider (OpenRouter or OpenCode Zen)."""
+    import answer_provider
+    reply, lat_ms, cost, prov, model = answer_provider.ask_answer(text)
+    return reply, lat_ms, cost, prov, model
 
 # --------------------------------------------------------------------------- Windows Actions Mapping
 KNOWN_SITES = {
@@ -393,10 +375,31 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
     else:
         misses = 0
         if kind == "reply":
-            line = say_line(payload)
+            if payload == "chit_chat":
+                import answer_provider
+                prov = answer_provider.get_configured_provider()
+                zen_key = answer_provider.get_opencode_zen_key()
+                or_key = answer_provider.get_openrouter_key()
+                if (prov == "opencode_zen" and zen_key) or (prov == "openrouter" and or_key):
+                    res = ask_llm(text)
+                    if len(res) == 5:
+                        line, llm_ms, llm_cost, ans_prov, ans_model = res
+                    else:
+                        line, llm_ms, llm_cost = res
+                        ans_prov, ans_model = "openrouter", LLM_MODEL
+                    trace_line(f"  answer {ans_prov} {ans_model} {llm_ms}ms  ${llm_cost:.5f}")
+                else:
+                    line = say_line(payload)
+            else:
+                line = say_line(payload)
         elif kind == "llm":
-            line, llm_ms, llm_cost = ask_llm(text)
-            trace_line(f"  llm {LLM_MODEL} {llm_ms}ms  ${llm_cost}")
+            res = ask_llm(text)
+            if len(res) == 5:
+                line, llm_ms, llm_cost, ans_prov, ans_model = res
+            else:
+                line, llm_ms, llm_cost = res
+                ans_prov, ans_model = "openrouter", LLM_MODEL
+            trace_line(f"  answer {ans_prov} {ans_model} {llm_ms}ms  ${llm_cost:.5f}")
         else:
             default_line = lambda: say_line(payload[0][3], **payload[0][4]) if len(payload) == 1 else say_line("compound_done")
             speak_first = any(a[1] in SPEAK_FIRST or (a[1].endswith("volume_set") and a[2] == "silent") for a in payload)

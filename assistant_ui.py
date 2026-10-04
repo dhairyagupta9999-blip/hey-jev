@@ -621,6 +621,26 @@ class MainWindow(QMainWindow):
                 "• <b>Dictation:</b> Dictation audio is sent only when explicitly requested.<br>"
                 "• <b>Local Credentials:</b> API keys are stored securely in Windows Credential Manager."
             )
+
+        ans_provider = self.settings.get("answer_provider", "openrouter")
+        if ans_provider == "opencode_zen":
+            ans_text = (
+                "<br><br><b>Answer Provider: OpenCode Zen (Free Models)</b><br>"
+                "• <b>Official Zen Privacy Policy:</b> According to OpenCode's official privacy documentation "
+                "(https://opencode.ai/docs/zen/), during the free period for models such as Big Pickle, Fledge, "
+                "MiMo, and Ling, collected data and prompt inputs <b>may be used to improve and train the models</b>.<br>"
+                "• <b>Strict Data Isolation:</b> In Hey Jev, OpenCode Zen is used <b>ONLY</b> for plain Q&A "
+                "(factual questions and chit-chat). Only the spoken transcript is transmitted. "
+                "<b>Never sent to Zen:</b> file names, paths, open window text, clipboard data, or PC automation tool outputs.<br>"
+                "• <b>Phase 6 PC Control:</b> Stays strictly on OpenRouter / on-device safety engine."
+            )
+        else:
+            ans_text = (
+                "<br><br><b>Answer Provider: OpenRouter (Haiku)</b><br>"
+                "• Factual Q&A routes to Claude 3 Haiku via OpenRouter under zero-retention / API terms. "
+                "OpenCode Zen is not contacted."
+            )
+        msg += ans_text
         self.privacy_text.setText(msg)
 
     # ---------------- Tab 6: Settings ----------------
@@ -666,7 +686,19 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(backend_group)
 
-        # STT Engine Group
+        # Answer Provider Group (Non-command Q&A and Chit-chat)
+        ans_group = QGroupBox("Answer Provider (Q&A & Chit-Chat)")
+        ans_lay = QFormLayout(ans_group)
+
+        self.ans_combo = QComboBox()
+        self.ans_combo.addItem("OpenRouter (Haiku)", "openrouter")
+        self.ans_combo.addItem("OpenCode Zen (free)", "opencode_zen")
+        cur_ans = self.settings.get("answer_provider", "openrouter")
+        self.ans_combo.setCurrentIndex(1 if cur_ans == "opencode_zen" else 0)
+        self.ans_combo.currentIndexChanged.connect(self._on_answer_provider_changed)
+        ans_lay.addRow("Answer Provider:", self.ans_combo)
+
+        lay.addWidget(ans_group)
         stt_group = QGroupBox("Speech-to-Text (STT)")
         stt_lay = QFormLayout(stt_group)
 
@@ -742,6 +774,13 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
         self._update_privacy_text()
 
+    def _on_answer_provider_changed(self, idx: int):
+        val = self.ans_combo.itemData(idx)
+        self.settings["answer_provider"] = val
+        os.environ["HEYJEV_ANSWER_PROVIDER"] = val
+        save_settings(self.settings)
+        self._update_privacy_text()
+
     def _on_stt_changed(self, idx: int):
         val = self.stt_combo.itemData(idx)
         self.settings["stt_engine"] = val
@@ -809,7 +848,8 @@ class MainWindow(QMainWindow):
             ("TypeSafe (Jev)", "TYPESAFE_API_KEY"),
             ("Fish Audio (TTS)", "FISH_AUDIO_API_KEY"),
             ("OpenRouter (Chat)", "OPENROUTER_API_KEY"),
-            ("OpenAI (Transcribe)", "OPENAI_API_KEY")
+            ("OpenAI (Transcribe)", "OPENAI_API_KEY"),
+            ("OpenCode Zen (free)", "OPENCODE_ZEN_API_KEY")
         ]
 
         for title, key_name in fields:

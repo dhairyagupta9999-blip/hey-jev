@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()  # so a .env works from the app bundle too, not just the terminal
 
 SERVICE = "com.jevsiri.keys"
-KEY_NAMES = ("TYPESAFE_API_KEY", "FISH_AUDIO_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY")
-OPTIONAL = ("OPENAI_API_KEY",)  # only used for dictation, straight to OpenAI instead of OpenRouter
+KEY_NAMES = ("TYPESAFE_API_KEY", "FISH_AUDIO_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "OPENCODE_ZEN_API_KEY")
+OPTIONAL = ("OPENAI_API_KEY", "OPENCODE_ZEN_API_KEY")  # optional providers / dictation
 
 
 def credential_manager_value(name):
@@ -21,6 +21,10 @@ def credential_manager_value(name):
 
 def get_secret(name):
     """Return key from .env if present, otherwise from Windows Credential Manager."""
+    if name == "OPENCODE_ZEN_API_KEY":
+        env_val = os.getenv("OPENCODE_ZEN_API_KEY") or os.getenv("OPENCODE_API_KEY")
+        if env_val:
+            return env_val.strip()
     return os.getenv(name) or credential_manager_value(name)  # .env wins, so editing it always takes effect
 
 
