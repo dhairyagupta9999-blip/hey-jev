@@ -197,5 +197,130 @@ class TestPhase6aOpenVocabularyApps(unittest.TestCase):
                 self.assertIn("120 applications", res_ref["line"])
 
 
+class TestPhase6bFilesAndSystemTargets(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.temp_dir = tempfile.mkdtemp(prefix="heyjev_test_files_")
+        # Populate test files
+        cls.resume_pdf = os.path.join(cls.temp_dir, "my_resume.pdf")
+        cls.notes_txt = os.path.join(cls.temp_dir, "meeting_notes.txt")
+        cls.budget_xlsx = os.path.join(cls.temp_dir, "q3_budget.xlsx")
+        cls.installer_exe = os.path.join(cls.temp_dir, "setup_tool.exe")
+        cls.script_ps1 = os.path.join(cls.temp_dir, "backup.ps1")
+
+        for fpath in (cls.resume_pdf, cls.notes_txt, cls.budget_xlsx, cls.installer_exe, cls.script_ps1):
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write("test content")
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls.temp_dir, ignore_errors=True)
+
+    def test_01_file_finder_temp_tree(self):
+        """File finder discovers files by name and extension in directory trees."""
+        import file_finder
+        # 1. Search by name 'resume'
+        res_name = file_finder.find_files("my resume", scan_dirs=[self.temp_dir])
+        self.assertGreater(len(res_name), 0)
+        self.assertEqual(res_name[0]["name"], "my_resume.pdf")
+
+        # 2. Search by type 'PDF'
+        res_type = file_finder.find_files("open the PDF", scan_dirs=[self.temp_dir])
+        self.assertGreater(len(res_type), 0)
+        self.assertTrue(any(f["name"].endswith(".pdf") for f in res_type))
+
+    def test_02_dangerous_files_require_confirmation(self):
+        """Never open .exe, .bat, .ps1 without confirmation."""
+        import file_finder
+        # .exe file unconfirmed
+        res_exe = file_finder.open_file_safe(self.installer_exe, confirmed=False)
+        self.assertTrue(res_exe.get("needs_confirmation"))
+        self.assertEqual(res_exe.get("risk_level"), "HIGH")
+        self.assertIn("requires confirmation", res_exe.get("message", ""))
+
+        # .ps1 script unconfirmed
+        res_ps1 = file_finder.open_file_safe(self.script_ps1, confirmed=False)
+        self.assertTrue(res_ps1.get("needs_confirmation"))
+        self.assertEqual(res_ps1.get("risk_level"), "HIGH")
+
+        # .exe confirmed with mock
+        with patch("os.startfile") as mock_start:
+            res_conf = file_finder.open_file_safe(self.installer_exe, confirmed=True)
+            self.assertTrue(res_conf.get("success"))
+            self.assertTrue(mock_start.called)
+
+    def test_03_multiple_files_ambiguity(self):
+        """When multiple files match, Tier 2 asks with top 3 choices."""
+        import file_finder
+        import tier2_resolver
+        mock_files = [
+            {"name": "resume_2026.pdf", "path": "C:\\resume_2026.pdf", "ext": ".pdf", "date_modified": 100, "is_dangerous": False},
+            {"name": "resume_v2.docx", "path": "C:\\resume_v2.docx", "ext": ".docx", "date_modified": 90, "is_dangerous": False},
+            {"name": "resume.txt", "path": "C:\\resume.txt", "ext": ".txt", "date_modified": 80, "is_dangerous": False},
+        ]
+        with patch("file_finder.find_files", return_value=mock_files):
+            res = tier2_resolver.resolve_tier2("open my resume")
+            self.assertIsNotNone(res)
+            self.assertEqual(res["status"], "ambiguous")
+            self.assertEqual(res["action"], "clarify_file")
+            self.assertIn("Which one would you like to open?", res["line"])
+
+    def test_04_system_targets_settings_and_utilities(self):
+        """Resolves ms-settings URIs, system utilities, and standard folders."""
+        import system_targets
+        with patch("os.startfile") as mock_start:
+            # Bluetooth settings
+            res_bt = system_targets.resolve_system_target("open Bluetooth settings")
+            self.assertIsNotNone(res_bt)
+            self.assertEqual(res_bt["type"], "setting")
+            self.assertEqual(res_bt["uri"], "ms-settings:bluetooth")
+
+            # Downloads folder
+            res_dl = system_targets.resolve_system_target("open the Downloads folder")
+            self.assertIsNotNone(res_dl)
+            self.assertEqual(res_dl["type"], "folder")
+
+        with patch("subprocess.Popen") as mock_popen:
+            # Task Manager
+            res_tm = system_targets.resolve_system_target("open Task Manager")
+            self.assertIsNotNone(res_tm)
+            self.assertEqual(res_tm["type"], "utility")
+            self.assertEqual(res_tm["cmd"], "taskmgr.exe")
+
+    def test_05_websites_url_and_known_sites(self):
+        """Resolves direct URLs and known site names."""
+        import system_targets
+        with patch("webbrowser.open") as mock_web:
+            # Known site: youtube
+            res_yt = system_targets.resolve_system_target("open youtube")
+            self.assertIsNotNone(res_yt)
+            self.assertEqual(res_yt["type"], "website")
+            self.assertEqual(res_yt["url"], "https://www.youtube.com")
+
+            # Direct URL
+            res_url = system_targets.resolve_system_target("open https://github.com/henryklunaris")
+            self.assertIsNotNone(res_url)
+            self.assertEqual(res_url["type"], "website")
+            self.assertEqual(res_url["url"], "https://github.com/henryklunaris")
+
+    def test_06_window_management_commands(self):
+        """Parses and executes window snapping, minimize, and maximize."""
+        import window_manager
+        with patch("window_manager.snap_window", return_value=True) as mock_snap:
+            res_snap = window_manager.resolve_window_command("snap Chrome to the left")
+            self.assertIsNotNone(res_snap)
+            self.assertEqual(res_snap["action"], "snap_left")
+            self.assertEqual(res_snap["target"], "Chrome")
+            mock_snap.assert_called_with("Chrome", "left")
+
+        with patch("window_manager.minimize_window", return_value=True) as mock_min:
+            res_min = window_manager.resolve_window_command("minimize Notepad")
+            self.assertIsNotNone(res_min)
+            self.assertEqual(res_min["action"], "minimize")
+            mock_min.assert_called_with("Notepad")
+
+
 if __name__ == "__main__":
     unittest.main()
