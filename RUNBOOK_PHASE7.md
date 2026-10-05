@@ -13,15 +13,16 @@ Run the complete suite:
 ```powershell
 .venv\Scripts\pytest.exe -v test_phase7_mcp.py
 ```
-Expected result: **13 passed**.
+Expected result: **21 passed**.
 
 ---
 
-## 2. Real PC Acceptance Commands (3 Harmless Commands)
+## 2. Real PC Acceptance Commands
 
+### Read-Only Inspection Commands (Zero Clicks, Zero Typing)
 Run these three safe, read-only `--text` commands on your real PC to verify end-to-end routing without typing into active windows:
 
-### Command 1: Open Window Listing (Read-only UI Inspection)
+#### Command 1: Open Window Listing (Read-only UI Inspection)
 ```powershell
 .venv\Scripts\python.exe siri.py --text "list the open windows"
 ```
@@ -29,7 +30,7 @@ Run these three safe, read-only `--text` commands on your real PC to verify end-
 - **Safety level:** `SAFE` (read-only inspection).
 - **Audit proof:** Check `%APPDATA%\HeyJev\actions.jsonl` for `"action": "list_windows"` or `"window_management"`, `"risk_level": "SAFE"`.
 
-### Command 2: File Discovery (Read-only Search)
+#### Command 2: File Discovery (Read-only Search)
 ```powershell
 .venv\Scripts\python.exe siri.py --text "find files named resume"
 ```
@@ -37,13 +38,37 @@ Run these three safe, read-only `--text` commands on your real PC to verify end-
 - **Safety level:** `SAFE` (read-only query). Output quarantined within `<DATA>` / `<MCP_DATA>` tags.
 - **Audit proof:** Check `%APPDATA%\HeyJev\actions.jsonl` for `"action": "find_files"`, `"risk_level": "SAFE"`.
 
-### Command 3: Active Window Status (Read-only State Inspection)
+#### Command 3: Active Window Status (Read-only State Inspection)
 ```powershell
 .venv\Scripts\python.exe siri.py --text "what window is currently active"
 ```
 - **What it does:** Inspects the current foreground window title without sending mouse clicks or keystrokes.
 - **Safety level:** `SAFE` (read-only).
 - **Audit proof:** Check `%APPDATA%\HeyJev\actions.jsonl` for `"risk_level": "SAFE"`.
+
+### Input Commands with Preview Mode ON (Prompt Before Action)
+With the Settings toggle **"Confirm every AI-agent UI action"** enabled (`tier3_confirm_all_actions: True`, default ON), run these two input commands:
+
+#### Command 4: Open Notepad and Type Hello World
+```powershell
+.venv\Scripts\python.exe siri.py --text "open Notepad and type hello world"
+```
+- **What it does:**
+  1. Opens Notepad (safe app launch).
+  2. Performs foreground window check verifying active window is Notepad (blocks shells, admin tools, Run dialog).
+  3. **Preview Mode Prompt:** Speaks *"I am about to type 'hello world'. Should I proceed?"*
+  4. Waits 8 seconds for explicit user "yes" confirmation (defaults to NO after 8s).
+  5. When confirmed with "yes", dispatches typing.
+- **Safety level:** `MEDIUM` / Preview Mode Confirmed.
+- **Audit proof:** Check `%APPDATA%\HeyJev\actions.jsonl` for `"type_text"` / `"ui_type"`.
+
+#### Command 5: Close Notepad
+```powershell
+.venv\Scripts\python.exe siri.py --text "close Notepad"
+```
+- **What it does:** Safely locates and closes the Notepad process/window with recorded undo capability.
+- **Safety level:** `MEDIUM` (undoable).
+- **Audit proof:** Check `%APPDATA%\HeyJev\actions.jsonl` for `"action": "close_app"`, `"target": "Notepad"`, `"undoable": true`.
 
 ---
 
@@ -79,3 +104,9 @@ Run these three safe, read-only `--text` commands on your real PC to verify end-
 | **Prompt Injection Quarantine** | **Mocks** | Tested with injection payloads: stripped and enclosed within `<MCP_DATA>` tags. |
 | **8-Step Ceiling & 30s Timeout** | **Mocks** | Tested in `test_phase7_mcp.py`: loop terminates at step 8 ceiling; 30s timeout aborts cleanly without freezing. |
 | **Global Cancellation (Esc / Stop)**| **Mocks & UI** | Tested in `test_phase7_mcp.py` and UI shortcut in `assistant_ui.py`: `request_global_cancel()` halts in-flight operations. |
+| **Foreground Shell / Admin Block**| **Mocks & Local** | Verified in `test_phase7_mcp.py`: PowerShell, cmd, wt, regedit, taskmgr, Run dialog, KeePass, Bitwarden, 1Password blocked from UI interaction. |
+| **Prohibited Key Combinations**| **Mocks & Local** | Verified in `test_phase7_mcp.py`: `Win+R`, `Win+X`, `Ctrl+Shift+Esc`, `Ctrl+Alt+Del`, `Win+Pause` blocked outright. |
+| **Window Closing Confirmation**| **Mocks & Local** | Verified in `test_phase7_mcp.py`: `Alt+F4` and `Ctrl+W` require explicit "yes" confirmation. |
+| **Sensitive Login / Banking Protection**| **Mocks & Local** | Verified in `test_phase7_mcp.py`: windows with login, password, or banking titles require explicit "yes" confirmation. |
+| **Preview Mode (Prompt-before-action)**| **Mocks & Settings UI**| Verified in `test_phase7_mcp.py` and `assistant_ui.py`: Speaks preview sentence and awaits "yes" before sending any click, type, or key to MCP. Defaults to ON. |
+| **Live App Path MCP Call**| **Real PC** | Invoked `window_management` (find) and `ui_snapshot` via `mcp_client` in Python: verified live stdio response and `<MCP_DATA>` wrapping with 0 real clicks or keystrokes. |

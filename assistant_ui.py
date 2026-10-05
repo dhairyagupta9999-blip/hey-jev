@@ -61,6 +61,7 @@ def load_settings() -> dict:
         "tier3_enabled": False,
         "tier3_provider": "openrouter",
         "tier3_daily_spend_cap": 0.10,
+        "tier3_confirm_all_actions": True,
         "tier3_always_confirm": ["delete_file", "run_powershell", "close_all", "shutdown_computer", "open_dangerous_file"]
     }
     if os.path.exists(SETTINGS_FILE):
@@ -677,8 +678,7 @@ class MainWindow(QMainWindow):
             "to the configured agent model endpoint. Zero audio is transmitted.<br>"
             "• <b>Prompt Injection Quarantine:</b> External data (files, window text, clipboard, web results) is strictly "
             "quarantined inside &lt;DATA&gt; tags with prompt-injection tokens redacted, preventing untrusted text from executing as instructions.<br>"
-            "• <b>Confirmation Safety:</b> High-risk operations (PowerShell commands, file deletions, 'close everything', system power) "
-            "always require explicit confirmation and default to NO after 8 seconds. Pressing Esc or saying 'stop' immediately halts the action."
+            "• <b>Preview Mode & Confirmation Safety:</b> When 'Confirm every AI-agent UI action' is enabled (default ON), Tier 3 speaks a preview sentence before every click, typing, or keypress and waits for 'yes'. Administrative tools and shells are blocked outright, and high-risk operations default to NO after 8 seconds. Pressing Esc or saying 'stop' immediately halts the action."
         )
         msg += t3_text
         self.privacy_text.setText(msg)
@@ -768,6 +768,11 @@ class MainWindow(QMainWindow):
         self.t3_spend_cap_spin.setValue(self.settings.get("tier3_daily_spend_cap", 0.10))
         self.t3_spend_cap_spin.valueChanged.connect(self._on_spend_cap_changed)
         t3_lay.addRow("Daily Spend Cap:", self.t3_spend_cap_spin)
+
+        self.chk_confirm_all = QCheckBox("Confirm every AI-agent UI action")
+        self.chk_confirm_all.setChecked(self.settings.get("tier3_confirm_all_actions", True))
+        self.chk_confirm_all.toggled.connect(self._on_confirm_all_toggled)
+        t3_lay.addRow(self.chk_confirm_all)
 
         confirm_box = QGroupBox("Actions That Always Need Confirmation")
         confirm_box_lay = QVBoxLayout(confirm_box)
@@ -889,6 +894,12 @@ class MainWindow(QMainWindow):
     def _on_spend_cap_changed(self, val: float):
         self.settings["tier3_daily_spend_cap"] = val
         os.environ["HEYJEV_TIER3_DAILY_SPEND_CAP"] = str(val)
+        save_settings(self.settings)
+        self._update_privacy_text()
+
+    def _on_confirm_all_toggled(self, checked: bool):
+        self.settings["tier3_confirm_all_actions"] = checked
+        os.environ["HEYJEV_TIER3_CONFIRM_ALL"] = "1" if checked else "0"
         save_settings(self.settings)
         self._update_privacy_text()
 

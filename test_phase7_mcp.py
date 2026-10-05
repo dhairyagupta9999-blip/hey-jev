@@ -144,12 +144,19 @@ class TestPhase7McpClient(unittest.TestCase):
         self.assertEqual(evaluate_risk("app")[0], SAFE)
         self.assertEqual(evaluate_risk("clipboard", {"action": "get"})[0], SAFE)
 
-        # Typing / Keys / Clicks / Mouse -> MEDIUM
+        # Typing / Keys / Clicks / Mouse
         self.assertEqual(evaluate_risk("ui_type")[0], MEDIUM)
         self.assertEqual(evaluate_risk("ui_select")[0], MEDIUM)
-        self.assertEqual(evaluate_risk("keyboard_control")[0], MEDIUM)
         self.assertEqual(evaluate_risk("ui_click")[0], MEDIUM)
-        self.assertEqual(evaluate_risk("mouse_control")[0], MEDIUM)
+        # keyboard_control: single key or type is MEDIUM, modifiers or no args is HIGH
+        self.assertEqual(evaluate_risk("keyboard_control", {"key": "enter"})[0], MEDIUM)
+        self.assertEqual(evaluate_risk("keyboard_control", {"action": "type", "text": "hello"})[0], MEDIUM)
+        self.assertEqual(evaluate_risk("keyboard_control", {"key": "c", "modifiers": "ctrl"})[0], HIGH)
+        self.assertEqual(evaluate_risk("keyboard_control")[0], HIGH)
+        # mouse_control: plain scroll is MEDIUM, clicks/moves/drag is HIGH
+        self.assertEqual(evaluate_risk("mouse_control", {"action": "scroll"})[0], MEDIUM)
+        self.assertEqual(evaluate_risk("mouse_control", {"action": "click"})[0], HIGH)
+        self.assertEqual(evaluate_risk("mouse_control")[0], HIGH)
         self.assertEqual(evaluate_risk("clipboard", {"action": "set"})[0], MEDIUM)
         self.assertEqual(evaluate_risk("clipboard", {"action": "clear"})[0], MEDIUM)
 
@@ -220,14 +227,16 @@ class TestPhase7McpClient(unittest.TestCase):
         client.proc.stdout.readline.return_value = mock_rpc_resp
 
         logged = []
-        with patch("safety_engine.log_action", side_effect=lambda tier, action, args, risk, res, **kw: logged.append((tier, action, risk, res))):
-            client.call_tool("ui_click", {"elementId": "btn_submit"})
-            self.assertEqual(len(logged), 1)
-            tier, action, risk, res = logged[0]
-            self.assertEqual(tier, 3)
-            self.assertEqual(action, "ui_click")
-            self.assertEqual(risk, MEDIUM)
-            self.assertEqual(res, "success")
+        with patch("safety_engine.get_foreground_window_info", return_value=("notepad.exe", "Untitled - Notepad")):
+            with patch("safety_engine.is_preview_mode_enabled", return_value=False):
+                with patch("safety_engine.log_action", side_effect=lambda tier, action, args, risk, res, **kw: logged.append((tier, action, risk, res))):
+                    client.call_tool("ui_click", {"elementId": "btn_submit"})
+                    self.assertEqual(len(logged), 1)
+                    tier, action, risk, res = logged[0]
+                    self.assertEqual(tier, 3)
+                    self.assertEqual(action, "ui_click")
+                    self.assertEqual(risk, MEDIUM)
+                    self.assertEqual(res, "success")
 
 
 class TestPhase7Tier3AgentWithMcp(unittest.TestCase):
@@ -431,6 +440,206 @@ class TestPhase7Tier3AgentWithMcp(unittest.TestCase):
                 self.assertEqual(lines[1]["risk_level"], MEDIUM)
                 self.assertEqual(lines[2]["action"], "process")
                 self.assertEqual(lines[2]["risk_level"], BLOCKED)
+
+
+class TestPhase7Step2SafetyHardening(unittest.TestCase):
+    """Unit tests for UI-bypass protections and preview mode."""
+
+    def setUp(self):
+        safety_engine.check_and_clear_cancel()
+        cm = safety_engine.get_confirmation_manager()
+        cm.cancel_pending("test setup")
+
+    def tearDown(self):
+        safety_engine.check_and_clear_cancel()
+        cm = safety_engine.get_confirmation_manager()
+        cm.cancel_pending("test teardown")
+        mcp_client.shutdown_mcp_client()
+
+    def test_01_run_dialog_bypass_blocked(self):
+        """Typing, clicking, or keys into Run dialog is blocked outright."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+
+        with patch("safety_engine.get_foreground_window_info", return_value=("explorer.exe", "Run")):
+            # MCP tools
+            res_type = client.call_tool("ui_type", {"text": "powershell.exe"})
+            self.assertIn("blocked by safety policy", res_type.lower())
+            self.assertIn("run", res_type.lower())
+
+            res_click = client.call_tool("ui_click", {"name": "OK"})
+            self.assertIn("blocked by safety policy", res_click.lower())
+
+            res_key = client.call_tool("keyboard_control", {"key": "enter"})
+            self.assertIn("blocked by safety policy", res_key.lower())
+
+            # Native tools
+            res_native_type = tier3_agent.tool_type_text("cmd.exe")
+            self.assertIn("blocked by safety policy", res_native_type.lower())
+
+            res_native_key = tier3_agent.tool_press_keys("enter")
+            self.assertIn("blocked by safety policy", res_native_key.lower())
+
+    def test_02_powershell_and_shell_foreground_blocked(self):
+        """Interacting with PowerShell, cmd, wt, or regedit window is blocked outright."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+
+        shells = [
+            ("powershell.exe", "Windows PowerShell"),
+            ("pwsh.exe", "PowerShell 7"),
+            ("cmd.exe", "Command Prompt"),
+            ("wt.exe", "Windows Terminal"),
+            ("regedit.exe", "Registry Editor"),
+            ("taskmgr.exe", "Task Manager"),
+            ("keepass.exe", "KeePass Password Safe"),
+            ("bitwarden.exe", "Bitwarden"),
+            ("1password.exe", "1Password"),
+        ]
+
+        for proc, title in shells:
+            with patch("safety_engine.get_foreground_window_info", return_value=(proc, title)):
+                res = client.call_tool("ui_type", {"text": "Get-Process"})
+                self.assertIn("blocked by safety policy", res.lower(), f"Failed to block {proc}")
+                self.assertIn(proc, res.lower())
+
+    def test_03_launch_shells_via_app_tool_blocked(self):
+        """app tool cannot launch cmd, powershell, wt, regedit, or admin tools."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+
+        blocked_targets = ["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "wt", "regedit", "taskmgr", "1password"]
+        for target in blocked_targets:
+            res_mcp = client.call_tool("app", {"programPath": target})
+            self.assertIn("blocked by safety policy", res_mcp.lower())
+
+            res_native = tier3_agent.tool_open_app(target)
+            self.assertIn("blocked by safety policy", res_native.lower())
+
+    def test_04_outright_blocked_shortcuts(self):
+        """Win+R, Win+X, Ctrl+Shift+Esc, Ctrl+Alt+Del, Win+Pause are blocked outright."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+
+        blocked_combos = [
+            {"key": "r", "modifiers": ["win"]},
+            {"key": "x", "modifiers": "windows"},
+            {"key": "esc", "modifiers": ["ctrl", "shift"]},
+            {"key": "del", "modifiers": ["ctrl", "alt"]},
+            {"key": "pause", "modifiers": "win"},
+        ]
+
+        with patch("safety_engine.get_foreground_window_info", return_value=("notepad.exe", "Untitled - Notepad")):
+            for combo in blocked_combos:
+                res_mcp = client.call_tool("keyboard_control", combo)
+                self.assertIn("prohibited by safety policy", res_mcp.lower())
+
+                mods = combo.get("modifiers")
+                mod_str = "+".join(mods) if isinstance(mods, list) else str(mods)
+                raw_combo_str = f"{mod_str}+{combo.get('key')}"
+                res_native = tier3_agent.tool_press_keys(raw_combo_str)
+                self.assertIn("prohibited by safety policy", res_native.lower())
+
+    def test_05_alt_f4_and_ctrl_w_require_yes(self):
+        """Alt+F4 and Ctrl+W require explicit user confirmation ('yes')."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+        cm = safety_engine.get_confirmation_manager()
+
+        with patch("safety_engine.get_foreground_window_info", return_value=("notepad.exe", "Untitled - Notepad")):
+            with patch("safety_engine.is_preview_mode_enabled", return_value=False):
+                res_alt_f4 = client.call_tool("keyboard_control", {"key": "f4", "modifiers": "alt"})
+                self.assertTrue(cm.has_pending())
+                self.assertIn("close a window", res_alt_f4.lower())
+                self.assertIn("proceed", res_alt_f4.lower())
+
+                # Test answering 'no' cancels
+                handled, msg = cm.respond("no")
+                self.assertTrue(handled)
+                self.assertFalse(cm.has_pending())
+
+                # Ctrl+W
+                res_ctrl_w = client.call_tool("keyboard_control", {"key": "w", "modifiers": "ctrl"})
+                self.assertTrue(cm.has_pending())
+                self.assertIn("close a window", res_ctrl_w.lower())
+                handled, msg = cm.respond("yes")
+                self.assertTrue(handled)
+                self.assertFalse(cm.has_pending())
+
+    def test_06_browser_login_or_banking_title_requires_yes(self):
+        """Browser windows with login or banking in title require 'yes' before input."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+        cm = safety_engine.get_confirmation_manager()
+
+        sensitive_titles = [
+            "Sign In to Your Account - Google Chrome",
+            "Bank of America | Log In",
+            "PayPal Checkout - Payment",
+            "Enter your Password",
+        ]
+
+        for title in sensitive_titles:
+            with patch("safety_engine.get_foreground_window_info", return_value=("chrome.exe", title)):
+                with patch("safety_engine.is_preview_mode_enabled", return_value=False):
+                    res = client.call_tool("ui_type", {"text": "secret"})
+                    self.assertTrue(cm.has_pending(), f"Expected pending confirmation for '{title}'")
+                    self.assertIn("sensitive", res.lower())
+                    cm.cancel_pending("next title test")
+
+    def test_07_preview_mode_on_prompts_and_waits_for_yes(self):
+        """When preview mode is ON, UI actions prompt with short description and wait for 'yes'."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+        cm = safety_engine.get_confirmation_manager()
+
+        mock_rpc_resp = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [{"type": "text", "text": "Clicked"}], "isError": False}
+        }) + "\n"
+        client.proc = MagicMock()
+        client.proc.poll.return_value = None
+        client.proc.stdout.readline.return_value = mock_rpc_resp
+
+        with patch("safety_engine.get_foreground_window_info", return_value=("notepad.exe", "Untitled - Notepad")):
+            with patch("safety_engine.is_preview_mode_enabled", return_value=True):
+                # 1. Action is dispatched
+                res = client.call_tool("ui_click", {"name": "File"})
+                self.assertTrue(cm.has_pending())
+                self.assertIn("I am about to click 'File'. Should I proceed?", res)
+                # RPC has NOT been sent yet
+                self.assertFalse(client.proc.stdin.write.called)
+
+                # 2. User confirms with "yes"
+                handled, confirm_msg = cm.respond("yes")
+                self.assertTrue(handled)
+                self.assertIn("Confirmed", confirm_msg)
+                # RPC was now sent
+                self.assertTrue(client.proc.stdin.write.called)
+
+    def test_08_preview_mode_off_runs_directly_on_safe_window(self):
+        """When preview mode is OFF, safe UI actions execute directly without prompting."""
+        client = WindowsMcpClient(exe_path="C:\\dummy\\server.exe")
+        client._available = True
+        cm = safety_engine.get_confirmation_manager()
+
+        mock_rpc_resp = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [{"type": "text", "text": "Typed"}], "isError": False}
+        }) + "\n"
+        client.proc = MagicMock()
+        client.proc.poll.return_value = None
+        client.proc.stdout.readline.return_value = mock_rpc_resp
+
+        with patch("safety_engine.get_foreground_window_info", return_value=("notepad.exe", "Untitled - Notepad")):
+            with patch("safety_engine.is_preview_mode_enabled", return_value=False):
+                res = client.call_tool("ui_type", {"text": "hello"})
+                self.assertFalse(cm.has_pending())
+                self.assertIn("<MCP_DATA>", res)
+                self.assertIn("Typed", res)
+                self.assertTrue(client.proc.stdin.write.called)
 
 
 if __name__ == "__main__":

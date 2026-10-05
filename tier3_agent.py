@@ -86,6 +86,11 @@ def is_spend_cap_exceeded() -> Tuple[bool, float, float]:
 
 # --------------------------------------------------------------------------- Tool Implementations (17 Tools)
 def tool_open_app(name: str) -> str:
+    safe, reason = safety_engine.check_app_launch_safety(name)
+    if not safe:
+        log_action(3, "open_app", {"app": name, "blocked": True}, BLOCKED, "blocked")
+        return f"Blocked by safety policy: {reason}"
+
     from app_index import get_app_index
     import system_targets
     # Check system target first
@@ -186,13 +191,60 @@ def tool_window_layout(action: str, target: str = "") -> str:
         return f"Restored {target}." if ok else f"Could not find {target}."
     return f"Unsupported window layout action '{action}'."
 
-def tool_type_text(text: str) -> str:
+def tool_type_text(text: str, bypass_confirmation: bool = False) -> str:
+    proc_name, title = safety_engine.get_foreground_window_info()
+    safe, status, reason = safety_engine.check_foreground_window_safety(proc_name, title)
+    if not safe or status == "BLOCKED":
+        log_action(3, "type_text", {"chars": len(text), "blocked": True}, BLOCKED, "blocked")
+        return f"Blocked by safety policy: {reason}"
+
+    if not bypass_confirmation:
+        if status == "REQUIRE_YES" or safety_engine.is_preview_mode_enabled():
+            cm = get_confirmation_manager()
+            desc = safety_engine.format_action_preview_description("ui_type", {"text": text})
+            if status == "REQUIRE_YES":
+                desc = f"Window '{title}' is a sensitive page. " + desc
+            cm.request_high_risk_confirmation(
+                "type_text",
+                desc,
+                lambda: tool_type_text(text, bypass_confirmation=True),
+                timeout_s=8.0
+            )
+            return desc
+
     from dictation import paste
     paste(text)
     log_action(3, "type_text", {"chars": len(text)}, MEDIUM, "success")
     return f"Typed {len(text)} characters into foreground window."
 
-def tool_press_keys(keys: str) -> str:
+def tool_press_keys(keys: str, bypass_confirmation: bool = False) -> str:
+    sec_status, sec_reason = safety_engine.check_shortcut_safety("press_keys", {"keys": keys})
+    if sec_status == "BLOCKED":
+        log_action(3, "press_keys", {"keys": keys, "blocked": True}, BLOCKED, "blocked")
+        return f"Blocked by safety policy: {sec_reason}"
+
+    proc_name, title = safety_engine.get_foreground_window_info()
+    safe, status, reason = safety_engine.check_foreground_window_safety(proc_name, title)
+    if not safe or status == "BLOCKED":
+        log_action(3, "press_keys", {"keys": keys, "blocked": True}, BLOCKED, "blocked")
+        return f"Blocked by safety policy: {reason}"
+
+    if not bypass_confirmation:
+        if sec_status == "REQUIRE_YES" or status == "REQUIRE_YES" or safety_engine.is_preview_mode_enabled():
+            cm = get_confirmation_manager()
+            desc = safety_engine.format_action_preview_description("press_keys", {"keys": keys})
+            if sec_status == "REQUIRE_YES":
+                desc = f"{sec_reason} " + desc
+            elif status == "REQUIRE_YES":
+                desc = f"Window '{title}' is a sensitive page. " + desc
+            cm.request_high_risk_confirmation(
+                "press_keys",
+                desc,
+                lambda: tool_press_keys(keys, bypass_confirmation=True),
+                timeout_s=8.0
+            )
+            return desc
+
     try:
         import keyboard
         keyboard.send(keys)
@@ -201,7 +253,27 @@ def tool_press_keys(keys: str) -> str:
     except Exception as e:
         return f"Failed to press keys {keys}: {e}"
 
-def tool_click_element(name_or_text: str) -> str:
+def tool_click_element(name_or_text: str, bypass_confirmation: bool = False) -> str:
+    proc_name, title = safety_engine.get_foreground_window_info()
+    safe, status, reason = safety_engine.check_foreground_window_safety(proc_name, title)
+    if not safe or status == "BLOCKED":
+        log_action(3, "click_element", {"target": name_or_text, "blocked": True}, BLOCKED, "blocked")
+        return f"Blocked by safety policy: {reason}"
+
+    if not bypass_confirmation:
+        if status == "REQUIRE_YES" or safety_engine.is_preview_mode_enabled():
+            cm = get_confirmation_manager()
+            desc = safety_engine.format_action_preview_description("ui_click", {"name": name_or_text})
+            if status == "REQUIRE_YES":
+                desc = f"Window '{title}' is a sensitive page. " + desc
+            cm.request_high_risk_confirmation(
+                "click_element",
+                desc,
+                lambda: tool_click_element(name_or_text, bypass_confirmation=True),
+                timeout_s=8.0
+            )
+            return desc
+
     import window_manager
     hwnd = window_manager.find_window_by_name(name_or_text)
     if hwnd:

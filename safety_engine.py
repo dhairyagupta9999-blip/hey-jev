@@ -80,14 +80,14 @@ ACTION_RISK_MAP = {
     "press_keys": MEDIUM,
     "clipboard_set": MEDIUM,
 
-    # Phase 7: MCP Windows Automation Tools (MEDIUM: typing/keys/clicks/mouse in apps)
+    # Phase 7: MCP Windows Automation Tools (MEDIUM: typing/select in apps)
     "ui_type": MEDIUM,
     "ui_select": MEDIUM,
-    "keyboard_control": MEDIUM,
     "ui_click": MEDIUM,
-    "mouse_control": MEDIUM,
 
     # HIGH (8-second explicit YES timeout, default NO)
+    "keyboard_control": HIGH,
+    "mouse_control": HIGH,
     "close_all": HIGH,
     "delete_file": HIGH,
     "move_file": HIGH,
@@ -106,23 +106,313 @@ ACTION_RISK_MAP = {
 
 BLOCKED = "BLOCKED"
 
+# --------------------------------------------------------------------------- UI Bypass & Administrative Tool Protections
+
+ADMIN_AND_SHELL_PROCESSES = {
+    "powershell", "powershell.exe",
+    "powershell_ise", "powershell_ise.exe",
+    "pwsh", "pwsh.exe",
+    "cmd", "cmd.exe",
+    "conhost", "conhost.exe",
+    "wt", "wt.exe",
+    "regedit", "regedit.exe",
+    "mmc", "mmc.exe",
+    "services", "services.msc", "services.exe",
+    "taskmgr", "taskmgr.exe",
+    "wscript", "wscript.exe",
+    "cscript", "cscript.exe",
+    "mshta", "mshta.exe",
+    "keepass", "keepass.exe",
+    "keepassxc", "keepassxc.exe",
+    "bitwarden", "bitwarden.exe",
+    "1password", "1password.exe",
+}
+
+ADMIN_AND_SHELL_TITLES = [
+    re.compile(r"^Run$", re.I),
+    re.compile(r"\bRun\b", re.I),
+    re.compile(r"Windows Security", re.I),
+    re.compile(r"User Account Control", re.I),
+    re.compile(r"\bUAC\b", re.I),
+    re.compile(r"\bTask Manager\b", re.I),
+    re.compile(r"\bRegistry Editor\b", re.I),
+    re.compile(r"\bComputer Management\b", re.I),
+    re.compile(r"\bServices\b", re.I),
+    re.compile(r"\b(?:KeePass|Bitwarden|1Password|LastPass)\b", re.I),
+    re.compile(r"\bWindows PowerShell\b", re.I),
+    re.compile(r"\bCommand Prompt\b", re.I),
+]
+
+BROWSER_PROCESSES = {
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "iexplore.exe",
+    "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "iexplore"
+}
+
+SENSITIVE_LOGIN_OR_BANKING_REGEX = re.compile(
+    r"\b(log\s*in|sign\s*in|password|bank(?:ing)?|payment|checkout|credit\s*card|auth(?:enticat\w+)?)\b",
+    re.I
+)
+
+OUTRIGHT_BLOCKED_SHORTCUTS = [
+    re.compile(r"\b(?:win|windows|cmd|meta)\s*\+\s*r\b", re.I),
+    re.compile(r"\b(?:win|windows|cmd|meta)\s*\+\s*x\b", re.I),
+    re.compile(r"\b(?:ctrl|control)\s*\+\s*shift\s*\+\s*esc(?:ape)?\b", re.I),
+    re.compile(r"\b(?:ctrl|control)\s*\+\s*alt\s*\+\s*del(?:ete)?\b", re.I),
+    re.compile(r"\b(?:win|windows|cmd|meta)\s*\+\s*pause\b", re.I),
+]
+
+CONFIRM_REQUIRED_SHORTCUTS = [
+    re.compile(r"\balt\s*\+\s*f4\b", re.I),
+    re.compile(r"\b(?:ctrl|control)\s*\+\s*w\b", re.I),
+]
+
+BLOCKED_APP_TARGETS = {
+    "powershell", "powershell.exe", "powershell_ise", "powershell_ise.exe",
+    "pwsh", "pwsh.exe", "cmd", "cmd.exe", "conhost", "conhost.exe",
+    "wt", "wt.exe", "regedit", "regedit.exe", "mmc", "mmc.exe",
+    "services", "services.msc", "services.exe", "taskmgr", "taskmgr.exe",
+    "wscript", "wscript.exe", "cscript", "cscript.exe", "mshta", "mshta.exe",
+    "keepass", "keepass.exe", "keepassxc", "keepassxc.exe",
+    "bitwarden", "bitwarden.exe", "1password", "1password.exe"
+}
+
+ALLOWED_SINGLE_KEYS = {
+    "enter", "tab", "escape", "space", "backspace", "up", "down", "left", "right",
+    "home", "end", "pageup", "pagedown", "f1", "f2", "f3", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"
+} | {chr(c) for c in range(ord('a'), ord('z')+1)} | {chr(c) for c in range(ord('0'), ord('9')+1)}
+
+
+def get_foreground_window_info() -> Tuple[str, str]:
+    """Get the process name and window title of the current foreground window."""
+    try:
+        import win32gui
+        import win32process
+        import psutil
+
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return ("", "")
+        title = win32gui.GetWindowText(hwnd).strip()
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        if pid <= 0:
+            return ("", title)
+        proc = psutil.Process(pid)
+        return (proc.name().lower(), title)
+    except Exception:
+        return ("", "")
+
+
+def check_foreground_window_safety(proc_name: str, title: str) -> Tuple[bool, str, str]:
+    """Check if the foreground window is safe for automated actions.
+    
+    Returns (is_allowed, status, reason):
+      status: "OK", "BLOCKED", or "REQUIRE_YES"
+    """
+    proc_clean = (proc_name or "").strip().lower()
+    proc_base = os.path.basename(proc_clean)
+    proc_no_ext, _ = os.path.splitext(proc_base)
+    title_clean = (title or "").strip()
+
+    # 1. Shells and admin tools by process name
+    if proc_clean in ADMIN_AND_SHELL_PROCESSES or proc_base in ADMIN_AND_SHELL_PROCESSES or proc_no_ext in ADMIN_AND_SHELL_PROCESSES:
+        return False, "BLOCKED", f"Foreground window belongs to administrative tool or shell '{proc_name}'. Interaction blocked by safety policy."
+
+    # 2. Protected windows by title (Run dialog, Windows Security, UAC, Task Manager, etc.)
+    for rx in ADMIN_AND_SHELL_TITLES:
+        if rx.search(title_clean):
+            return False, "BLOCKED", f"Foreground window '{title}' is a protected administrative dialog. Interaction blocked by safety policy."
+
+    # 3. Sensitive browser / authentication windows (login, sign-in, banking, payment)
+    if SENSITIVE_LOGIN_OR_BANKING_REGEX.search(title_clean):
+        return True, "REQUIRE_YES", f"Window '{title}' appears to be a sensitive login or banking page. Explicit confirmation required."
+
+    return True, "OK", ""
+
+
+def normalize_shortcut_str(key: str = "", modifiers: Any = None, raw_keys: str = "") -> str:
+    """Normalize keyboard shortcut components into canonical format like 'ctrl+shift+esc'."""
+    tokens = []
+    if raw_keys:
+        raw_parts = [re.sub(r"[\[\]'\"\(\)]", "", p).strip().lower() for p in raw_keys.replace("-", "+").split("+") if p.strip()]
+        for p in raw_parts:
+            if not p:
+                continue
+            if p in ("windows", "cmd", "meta", "super", "win"):
+                tokens.append("win")
+            elif p in ("control", "ctrl"):
+                tokens.append("ctrl")
+            elif p in ("escape", "esc"):
+                tokens.append("esc")
+            elif p in ("delete", "del"):
+                tokens.append("del")
+            else:
+                tokens.append(p)
+    else:
+        if modifiers:
+            if isinstance(modifiers, list):
+                mod_list = modifiers
+            elif isinstance(modifiers, str):
+                mod_list = modifiers.replace("-", "+").split("+")
+            else:
+                mod_list = [str(modifiers)]
+            for m in mod_list:
+                m_clean = m.strip().lower()
+                if m_clean in ("windows", "cmd", "meta", "super", "win"):
+                    tokens.append("win")
+                elif m_clean in ("control", "ctrl"):
+                    tokens.append("ctrl")
+                elif m_clean:
+                    tokens.append(m_clean)
+        if key:
+            k_clean = str(key).strip().lower()
+            if k_clean in ("escape", "esc"):
+                tokens.append("esc")
+            elif k_clean in ("delete", "del"):
+                tokens.append("del")
+            elif k_clean:
+                tokens.append(k_clean)
+
+    order = {"ctrl": 1, "alt": 2, "shift": 3, "win": 4}
+    mod_tokens = sorted([t for t in tokens if t in order], key=lambda x: order[x])
+    base_tokens = [t for t in tokens if t not in order]
+    return "+".join(mod_tokens + base_tokens)
+
+
+def check_shortcut_safety(action: str, args: Dict[str, Any]) -> Tuple[str, str]:
+    """Check keyboard shortcut for safety rules.
+    
+    Returns (status, reason):
+      status: "BLOCKED", "REQUIRE_YES", or "OK"
+    """
+    key = str(args.get("key", "")).strip()
+    modifiers = args.get("modifiers")
+    raw_keys = str(args.get("keys", args.get("text", "") if action in ("press_keys", "shortcut") else "")).strip()
+
+    norm = normalize_shortcut_str(key=key, modifiers=modifiers, raw_keys=raw_keys)
+    if not norm:
+        return "OK", ""
+
+    # 1. Outright blocked shortcuts: Win+R, Win+X, Ctrl+Shift+Esc, Ctrl+Alt+Del, Win+Pause
+    for rx in OUTRIGHT_BLOCKED_SHORTCUTS:
+        if rx.search(norm):
+            return "BLOCKED", f"Shortcut '{norm}' is prohibited by safety policy."
+
+    # 2. Confirm required shortcuts: Alt+F4, Ctrl+W
+    for rx in CONFIRM_REQUIRED_SHORTCUTS:
+        if rx.search(norm):
+            return "REQUIRE_YES", f"Shortcut '{norm}' will close a window or tab. Explicit confirmation required."
+
+    return "OK", ""
+
+
+def check_app_launch_safety(target: str) -> Tuple[bool, str]:
+    """Check if application launch target is blocked (administrative tools, shells, password managers)."""
+    t_clean = (target or "").strip().lower()
+    base = os.path.basename(t_clean)
+    name_no_ext, _ = os.path.splitext(base)
+
+    if base in BLOCKED_APP_TARGETS or name_no_ext in BLOCKED_APP_TARGETS or t_clean in BLOCKED_APP_TARGETS:
+        return False, f"Launching '{target}' is prohibited by safety policy."
+
+    for b_app in BLOCKED_APP_TARGETS:
+        if re.search(rf"\b{re.escape(b_app)}\b", t_clean):
+            return False, f"Launching '{target}' is prohibited by safety policy."
+
+    return True, ""
+
+
+def is_preview_mode_enabled() -> bool:
+    """Check if 'Confirm every AI-agent UI action' is enabled in settings (default True)."""
+    try:
+        from assistant_ui import get_settings
+        return bool(get_settings().get("tier3_confirm_all_actions", True))
+    except Exception:
+        return True
+
+
+def format_action_preview_description(action: str, args: Dict[str, Any]) -> str:
+    """Format a single short sentence describing the next UI action for user confirmation."""
+    act = action.strip().lower()
+    if act == "ui_click":
+        elem = args.get("elementId") or args.get("name") or "target element"
+        return f"I am about to click '{elem}'. Should I proceed?"
+    elif act == "ui_type":
+        txt = args.get("text", "")
+        short_txt = (txt[:25] + "...") if len(txt) > 25 else txt
+        return f"I am about to type '{short_txt}'. Should I proceed?"
+    elif act == "ui_select":
+        val = args.get("value") or "selected item"
+        return f"I am about to select '{val}'. Should I proceed?"
+    elif act in ("keyboard_control", "press_keys"):
+        key = args.get("key") or args.get("keys") or args.get("text") or "key"
+        mod = args.get("modifiers")
+        combo = f"{mod}+{key}" if mod else str(key)
+        return f"I am about to press '{combo}'. Should I proceed?"
+    elif act == "mouse_control":
+        m_act = args.get("action") or "click"
+        return f"I am about to perform mouse {m_act}. Should I proceed?"
+    elif act == "clipboard" and args.get("action") in ("set", "clear"):
+        return f"I am about to update the clipboard. Should I proceed?"
+    return f"I am about to execute '{action}'. Should I proceed?"
+
+
 def evaluate_risk(action: str, args: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
     """Evaluate the risk level of an action and determine if it is permitted.
     
     Returns (risk_level, is_allowed).
     - Unknown tools or explicitly denied tools return ("BLOCKED", False).
-    - Typing / keys into apps return (MEDIUM, True).
+    - App launching shells/admin tools returns ("BLOCKED", False).
+    - Blocked shortcuts return ("BLOCKED", False).
+    - mouse_control is HIGH unless action == "scroll".
+    - keyboard_control is HIGH unless single allowed key or plain type without modifiers.
     - Inspection / read actions return (SAFE, True).
     """
     args = args or {}
     act = action.strip().lower()
-    
+
+    # App launch security check
+    if act in ("app", "open_app"):
+        target = args.get("programPath") or args.get("name") or args.get("target") or ""
+        safe, _ = check_app_launch_safety(str(target))
+        if not safe:
+            return BLOCKED, False
+        return SAFE, True
+
     # Check clipboard action parameter
     if act == "clipboard":
         clip_act = args.get("action", "get").lower()
         if clip_act in ("set", "clear"):
             return MEDIUM, True
         return SAFE, True
+
+    # Mouse control risk: plain scroll is MEDIUM; click/move/drag is HIGH
+    if act == "mouse_control":
+        mouse_act = args.get("action", "").lower()
+        if mouse_act == "scroll":
+            return MEDIUM, True
+        return HIGH, True
+
+    # Keyboard control risk: single allowed key or plain type without modifiers is MEDIUM;
+    # shortcuts, modifiers, or blocked combinations are HIGH or BLOCKED
+    if act in ("keyboard_control", "press_keys"):
+        sec_status, _ = check_shortcut_safety(act, args)
+        if sec_status == "BLOCKED":
+            return BLOCKED, False
+        elif sec_status == "REQUIRE_YES":
+            return HIGH, True
+
+        key = str(args.get("key", "")).strip().lower()
+        modifiers = args.get("modifiers")
+        has_modifiers = bool(modifiers and str(modifiers).strip())
+        kb_act = args.get("action", "").lower()
+
+        if has_modifiers:
+            return HIGH, True
+        if kb_act == "type":
+            return MEDIUM, True
+        if key in ALLOWED_SINGLE_KEYS or len(key) == 1:
+            return MEDIUM, True
+        return HIGH, True
 
     if act in ACTION_RISK_MAP:
         risk = ACTION_RISK_MAP[act]

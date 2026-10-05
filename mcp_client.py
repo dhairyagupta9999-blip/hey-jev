@@ -309,15 +309,19 @@ class WindowsMcpClient:
                 })
             return specs
 
-    def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+    def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None, bypass_confirmation: bool = False) -> str:
         """Execute a tool through the MCP server with strict safety gating.
         
         Enforces:
           1. Global cancel check before execution
           2. Tool allowlist validation (denied by default)
-          3. Safety Engine risk classification (MEDIUM for typing/clicks, SAFE for read)
-          4. Output sanitization & prompt injection quarantining (<MCP_DATA>)
-          5. Action logging to actions.jsonl
+          3. App launch target verification (blocks shells, admin tools, pw managers)
+          4. Shortcut safety verification (blocks Win+R/Win+X, requires yes for Alt+F4/Ctrl+W)
+          5. Safety Engine risk classification (MEDIUM for typing/clicks, SAFE for read)
+          6. Foreground window check before every MEDIUM/HIGH action (blocks shells/admin, confirms sensitive login/bank)
+          7. Preview mode (prompts before sending clicks, typing, or keys when enabled)
+          8. Output sanitization & prompt injection quarantining (<MCP_DATA>)
+          9. Action logging to actions.jsonl
         """
         arguments = arguments or {}
 
@@ -331,13 +335,70 @@ class WindowsMcpClient:
             safety_engine.log_action(3, name, arguments, BLOCKED, f"blocked: {reason}")
             return f"Blocked: {reason}"
 
-        # 3. Safety Engine Risk Gating
+        # 3. App Launch Security Gating
+        if name == "app":
+            target = arguments.get("programPath") or arguments.get("name") or arguments.get("target") or ""
+            safe, app_reason = safety_engine.check_app_launch_safety(str(target))
+            if not safe:
+                safety_engine.log_action(3, name, arguments, BLOCKED, f"blocked: {app_reason}")
+                return f"Action 'app' blocked by safety policy: {app_reason}"
+
+        # 4. Shortcut Safety Gating
+        if name in ("keyboard_control",):
+            sec_status, sec_reason = safety_engine.check_shortcut_safety(name, arguments)
+            if sec_status == "BLOCKED":
+                safety_engine.log_action(3, name, arguments, BLOCKED, f"blocked: {sec_reason}")
+                return f"Action '{name}' blocked by safety policy: {sec_reason}"
+            if sec_status == "REQUIRE_YES" and not bypass_confirmation:
+                desc = f"{sec_reason} " + safety_engine.format_action_preview_description(name, arguments)
+                cm = safety_engine.get_confirmation_manager()
+                cm.request_high_risk_confirmation(
+                    action=name,
+                    message=desc,
+                    execute_fn=lambda: self.call_tool(name, arguments, bypass_confirmation=True),
+                    timeout_s=8.0
+                )
+                return desc
+
+        # 5. Safety Engine Risk Gating
         risk_level, is_allowed = safety_engine.evaluate_risk(name, arguments)
         if not is_allowed or risk_level == BLOCKED:
             safety_engine.log_action(3, name, arguments, BLOCKED, "blocked by safety policy")
             return f"Action '{name}' blocked by safety policy."
 
-        # 4. Check Server Availability
+        # 6. Foreground Window Check before every MEDIUM or HIGH action
+        is_input_or_mutation = name in ("ui_click", "ui_type", "ui_select", "keyboard_control", "mouse_control") or (name == "clipboard" and arguments.get("action") in ("set", "clear"))
+        if is_input_or_mutation:
+            proc_name, title = safety_engine.get_foreground_window_info()
+            fw_allowed, fw_status, fw_reason = safety_engine.check_foreground_window_safety(proc_name, title)
+            if not fw_allowed or fw_status == "BLOCKED":
+                safety_engine.log_action(3, name, arguments, BLOCKED, f"blocked: {fw_reason}")
+                return f"Action '{name}' blocked by safety policy: {fw_reason}"
+            if fw_status == "REQUIRE_YES" and not bypass_confirmation:
+                desc = f"Window '{title}' is a sensitive page. " + safety_engine.format_action_preview_description(name, arguments)
+                cm = safety_engine.get_confirmation_manager()
+                cm.request_high_risk_confirmation(
+                    action=name,
+                    message=desc,
+                    execute_fn=lambda: self.call_tool(name, arguments, bypass_confirmation=True),
+                    timeout_s=8.0
+                )
+                return desc
+
+        # 7. Preview Mode (prompt-before-action for UI inputs)
+        if safety_engine.is_preview_mode_enabled() and not bypass_confirmation:
+            if is_input_or_mutation:
+                desc = safety_engine.format_action_preview_description(name, arguments)
+                cm = safety_engine.get_confirmation_manager()
+                cm.request_high_risk_confirmation(
+                    action=name,
+                    message=desc,
+                    execute_fn=lambda: self.call_tool(name, arguments, bypass_confirmation=True),
+                    timeout_s=8.0
+                )
+                return desc
+
+        # 8. Check Server Availability
         if not self.is_available():
             # Attempt lazy start once
             started = self.start()
