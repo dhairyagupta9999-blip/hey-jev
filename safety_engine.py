@@ -63,12 +63,29 @@ ACTION_RISK_MAP = {
     "open_url": SAFE,
     "clipboard_get": SAFE,
 
+    # Phase 7: MCP Windows Automation Tools (SAFE: inspection/read/window/launch)
+    "ui_find": SAFE,
+    "ui_read": SAFE,
+    "ui_read_table": SAFE,
+    "ui_snapshot": SAFE,
+    "screenshot_control": SAFE,
+    "ui_wait": SAFE,
+    "window_management": SAFE,
+    "app": SAFE,
+
     # MEDIUM (2-second grace period)
     "close_app": MEDIUM,
     "app_quit": MEDIUM,
     "type_text": MEDIUM,
     "press_keys": MEDIUM,
     "clipboard_set": MEDIUM,
+
+    # Phase 7: MCP Windows Automation Tools (MEDIUM: typing/keys/clicks/mouse in apps)
+    "ui_type": MEDIUM,
+    "ui_select": MEDIUM,
+    "keyboard_control": MEDIUM,
+    "ui_click": MEDIUM,
+    "mouse_control": MEDIUM,
 
     # HIGH (8-second explicit YES timeout, default NO)
     "close_all": HIGH,
@@ -86,6 +103,33 @@ ACTION_RISK_MAP = {
     "send_message": HIGH,
     "send_email": HIGH,
 }
+
+BLOCKED = "BLOCKED"
+
+def evaluate_risk(action: str, args: Optional[Dict[str, Any]] = None) -> Tuple[str, bool]:
+    """Evaluate the risk level of an action and determine if it is permitted.
+    
+    Returns (risk_level, is_allowed).
+    - Unknown tools or explicitly denied tools return ("BLOCKED", False).
+    - Typing / keys into apps return (MEDIUM, True).
+    - Inspection / read actions return (SAFE, True).
+    """
+    args = args or {}
+    act = action.strip().lower()
+    
+    # Check clipboard action parameter
+    if act == "clipboard":
+        clip_act = args.get("action", "get").lower()
+        if clip_act in ("set", "clear"):
+            return MEDIUM, True
+        return SAFE, True
+
+    if act in ACTION_RISK_MAP:
+        risk = ACTION_RISK_MAP[act]
+        return risk, True
+
+    # Unknown or unmapped actions are blocked by default
+    return BLOCKED, False
 
 # --------------------------------------------------------------------------- PowerShell Denylist
 POWERSHELL_DENYLIST = [

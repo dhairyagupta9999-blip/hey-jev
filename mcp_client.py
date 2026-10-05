@@ -1,0 +1,431 @@
+"""MCP Client for Windows UI Automation in Hey Jev Tier 3.
+
+Connects to sbroenne/mcp-windows (Sbroenne.WindowsMcp.exe) over stdio.
+Enforces:
+  - Tool allowlist (UI find/read/snapshot, click, type, key/shortcut, scroll, window focus/resize, app launch)
+  - Deny by default (PowerShell/shell, registry, file write/dialogs, process kill, services, network config)
+  - Single clean error message if server fails to start, remaining off
+  - Full Safety Engine gating (typing/keys into apps = MEDIUM, inspection/read = SAFE, unknown = BLOCKED)
+  - Prompt injection quarantine: all outputs wrapped in <MCP_DATA> tags
+  - Esc and 'stop' spoken cancel in-flight operations
+  - Audit logging to %APPDATA%/HeyJev/actions.jsonl
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+import json
+import subprocess
+import threading
+from typing import Any, Dict, List, Optional, Tuple
+
+import safety_engine
+from safety_engine import SAFE, MEDIUM, HIGH, BLOCKED, log_action, sanitize_data_content, is_cancel_requested
+
+# --------------------------------------------------------------------------- Configuration & Tool Lists
+
+# Default path to standalone binary
+DEFAULT_EXE_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), ".venv-agents", "bin", "mcp-windows", "Sbroenne.WindowsMcp.exe")
+)
+
+# Standard Allowed Tools and their Risk Levels
+ALLOWED_TOOLS: Dict[str, Dict[str, Any]] = {
+    # UI inspection and reading (SAFE)
+    "ui_find": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Find UI elements by name, controlType, or automationId."
+    },
+    "ui_read": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Read text and accessibility properties of an observed element."
+    },
+    "ui_read_table": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Read structured rows and columns from a grid or table."
+    },
+    "ui_snapshot": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Capture compact element hierarchy for window orientation."
+    },
+    "screenshot_control": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Capture screenshot of desktop or window for visual state."
+    },
+    "ui_wait": {
+        "risk": SAFE,
+        "category": "ui_read",
+        "description": "Wait until a UI condition (appear, disappear, state) is met."
+    },
+
+    # Window management (SAFE)
+    "window_management": {
+        "risk": SAFE,
+        "category": "window_management",
+        "description": "Find, activate, move, resize, snap, minimize, or maximize windows."
+    },
+
+    # App launch (SAFE)
+    "app": {
+        "risk": SAFE,
+        "category": "app_launch",
+        "description": "Launch Windows applications by name or executable path."
+    },
+
+    # Clipboard (get is SAFE, set/clear is MEDIUM)
+    "clipboard": {
+        "risk": SAFE,
+        "category": "clipboard",
+        "description": "Read text from the Windows clipboard, or write text to it."
+    },
+
+    # UI actions and input in applications (MEDIUM)
+    "ui_click": {
+        "risk": MEDIUM,
+        "category": "ui_action",
+        "description": "Click or double-click an element discovered by ui_find or ui_snapshot."
+    },
+    "ui_type": {
+        "risk": MEDIUM,
+        "category": "ui_action",
+        "description": "Type text into an input field discovered by ui_find or ui_snapshot."
+    },
+    "ui_select": {
+        "risk": MEDIUM,
+        "category": "ui_action",
+        "description": "Select an item in a combo box, dropdown list, or tab control."
+    },
+    "keyboard_control": {
+        "risk": MEDIUM,
+        "category": "ui_action",
+        "description": "Send keyboard shortcuts, keystrokes, or key combinations."
+    },
+    "mouse_control": {
+        "risk": MEDIUM,
+        "category": "ui_action",
+        "description": "Simulate mouse move, click, drag, or scroll."
+    },
+}
+
+# Explicitly Denied Tools (denied by default)
+DENIED_TOOLS: Dict[str, str] = {
+    "process": "Process management and process termination are denied by default.",
+    "file_save": "Direct file save dialog manipulation is denied by default.",
+    "file_open": "Direct file open dialog manipulation is denied by default.",
+    "ui_batch": "Batch command execution without per-step validation is denied by default.",
+    "powershell": "Arbitrary shell execution is denied by default.",
+    "powershell_tool": "PowerShell execution is denied by default.",
+    "registry_tool": "Registry modification is denied by default.",
+    "process_tool": "Process control is denied by default.",
+}
+
+CLEAN_ERROR_MESSAGE = "Windows automation service is unavailable. Please check MCP server installation."
+
+
+# --------------------------------------------------------------------------- McpClient Class
+
+class WindowsMcpClient:
+    """Client for communicating with the Windows MCP server over stdio."""
+
+    def __init__(self, exe_path: Optional[str] = None):
+        self.exe_path = exe_path or os.environ.get("HEYJEV_WINDOWS_MCP_EXE") or DEFAULT_EXE_PATH
+        self.proc: Optional[subprocess.Popen] = None
+        self._initialized = False
+        self._available = False
+        self._error_message = ""
+        self._cached_tools: List[Dict[str, Any]] = []
+        self._cached_tool_names: set[str] = set()
+        self._id_counter = 1
+        self._lock = threading.RLock()
+
+    def is_available(self) -> bool:
+        """Returns True if the MCP server is installed and running."""
+        with self._lock:
+            return self._available and (self.proc is not None) and (self.proc.poll() is None)
+
+    def get_error_message(self) -> str:
+        """Returns clean user-facing error message if server is unavailable."""
+        return self._error_message or CLEAN_ERROR_MESSAGE
+
+    def start(self, timeout_s: float = 8.0) -> bool:
+        """Start the MCP server subprocess over stdio and complete handshake.
+        
+        Returns True if handshake succeeds, False otherwise.
+        On failure, sets a single clean error message and stays off.
+        """
+        with self._lock:
+            if self.is_available():
+                return True
+
+            if not self.exe_path or not os.path.exists(self.exe_path):
+                self._available = False
+                self._error_message = CLEAN_ERROR_MESSAGE
+                return False
+
+            try:
+                self.proc = subprocess.Popen(
+                    [self.exe_path],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    bufsize=0
+                )
+            except Exception:
+                self._available = False
+                self._error_message = CLEAN_ERROR_MESSAGE
+                return False
+
+            # Complete JSON-RPC 2.0 handshake
+            try:
+                init_id = self._next_id()
+                self._send_raw({
+                    "jsonrpc": "2.0",
+                    "id": init_id,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "hey-jev-client", "version": "1.0.0"}
+                    }
+                })
+
+                init_resp = self._read_raw(timeout_s=timeout_s)
+                if not init_resp or init_resp.get("id") != init_id or "result" not in init_resp:
+                    self.stop()
+                    self._available = False
+                    self._error_message = CLEAN_ERROR_MESSAGE
+                    return False
+
+                # Initialized notification
+                self._send_raw({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                    "params": {}
+                })
+
+                # Query tools list to discover exposed schemas
+                tools_id = self._next_id()
+                self._send_raw({
+                    "jsonrpc": "2.0",
+                    "id": tools_id,
+                    "method": "tools/list",
+                    "params": {}
+                })
+
+                tools_resp = self._read_raw(timeout_s=timeout_s)
+                raw_tools = []
+                if tools_resp and "result" in tools_resp and "tools" in tools_resp["result"]:
+                    raw_tools = tools_resp["result"]["tools"]
+
+                # Filter tools strictly by ALLOWED_TOOLS
+                self._cached_tools = []
+                self._cached_tool_names = set()
+                for tool in raw_tools:
+                    name = tool.get("name")
+                    if name in ALLOWED_TOOLS:
+                        self._cached_tools.append(tool)
+                        self._cached_tool_names.add(name)
+
+                self._initialized = True
+                self._available = True
+                self._error_message = ""
+                return True
+
+            except Exception:
+                self.stop()
+                self._available = False
+                self._error_message = CLEAN_ERROR_MESSAGE
+                return False
+
+    def stop(self) -> None:
+        """Terminate the server process and reset state."""
+        with self._lock:
+            self._available = False
+            self._initialized = False
+            if self.proc is not None:
+                try:
+                    self.proc.terminate()
+                    self.proc.wait(timeout=2.0)
+                except Exception:
+                    try:
+                        self.proc.kill()
+                    except Exception:
+                        pass
+                self.proc = None
+
+    def _next_id(self) -> int:
+        cur = self._id_counter
+        self._id_counter += 1
+        return cur
+
+    def _send_raw(self, msg: Dict[str, Any]) -> None:
+        if not self.proc or not self.proc.stdin:
+            raise RuntimeError("Process stdin is not open")
+        payload = json.dumps(msg) + "\n"
+        self.proc.stdin.write(payload)
+        self.proc.stdin.flush()
+
+    def _read_raw(self, timeout_s: float = 10.0) -> Optional[Dict[str, Any]]:
+        if not self.proc or not self.proc.stdout:
+            return None
+
+        # Read line from stdout with cancellation checking
+        t_start = time.perf_counter()
+        while time.perf_counter() - t_start < timeout_s:
+            if is_cancel_requested():
+                return None
+            line = self.proc.stdout.readline()
+            if line:
+                try:
+                    return json.loads(line)
+                except Exception:
+                    return None
+            time.sleep(0.02)
+        return None
+
+    def get_openai_tool_specs(self) -> List[Dict[str, Any]]:
+        """Return allowed tools formatted for OpenAI/OpenRouter tool_calls."""
+        with self._lock:
+            specs = []
+            for t in self._cached_tools:
+                name = t.get("name")
+                desc = ALLOWED_TOOLS.get(name, {}).get("description", t.get("description", ""))
+                schema = t.get("inputSchema", {"type": "object", "properties": {}})
+                specs.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": desc,
+                        "parameters": schema
+                    }
+                })
+            return specs
+
+    def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> str:
+        """Execute a tool through the MCP server with strict safety gating.
+        
+        Enforces:
+          1. Global cancel check before execution
+          2. Tool allowlist validation (denied by default)
+          3. Safety Engine risk classification (MEDIUM for typing/clicks, SAFE for read)
+          4. Output sanitization & prompt injection quarantining (<MCP_DATA>)
+          5. Action logging to actions.jsonl
+        """
+        arguments = arguments or {}
+
+        # 1. Global Cancel Check
+        if is_cancel_requested():
+            return "Action cancelled."
+
+        # 2. Allowlist Check (Deny by default)
+        if name not in ALLOWED_TOOLS:
+            reason = DENIED_TOOLS.get(name, f"Tool '{name}' is not in the allowed tools list (denied by default).")
+            safety_engine.log_action(3, name, arguments, BLOCKED, f"blocked: {reason}")
+            return f"Blocked: {reason}"
+
+        # 3. Safety Engine Risk Gating
+        risk_level, is_allowed = safety_engine.evaluate_risk(name, arguments)
+        if not is_allowed or risk_level == BLOCKED:
+            safety_engine.log_action(3, name, arguments, BLOCKED, "blocked by safety policy")
+            return f"Action '{name}' blocked by safety policy."
+
+        # 4. Check Server Availability
+        if not self.is_available():
+            # Attempt lazy start once
+            started = self.start()
+            if not started:
+                safety_engine.log_action(3, name, arguments, risk_level, "failed: server unavailable")
+                return self.get_error_message()
+
+        # 5. Cancellation check right before dispatch
+        if is_cancel_requested():
+            return "Action cancelled."
+
+        # 6. Dispatch over stdio
+        call_id = self._next_id()
+        msg = {
+            "jsonrpc": "2.0",
+            "id": call_id,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments
+            }
+        }
+
+        with self._lock:
+            try:
+                self._send_raw(msg)
+                resp = self._read_raw(timeout_s=10.0)
+            except Exception as exc:
+                safety_engine.log_action(3, name, arguments, risk_level, f"failed: {exc}")
+                return f"Tool execution failed: {exc}"
+
+        if is_cancel_requested():
+            return "Action cancelled."
+
+        if not resp:
+            safety_engine.log_action(3, name, arguments, risk_level, "timeout")
+            return f"Tool '{name}' timed out without response."
+
+        if "error" in resp:
+            err = resp["error"].get("message", "unknown error")
+            safety_engine.log_action(3, name, arguments, risk_level, f"error: {err}")
+            return f"Tool error: {err}"
+
+        res_obj = resp.get("result", {})
+        is_error = res_obj.get("isError", False)
+        content_items = res_obj.get("content", [])
+        
+        output_parts = []
+        for item in content_items:
+            if isinstance(item, dict):
+                output_parts.append(str(item.get("text", "")))
+            else:
+                output_parts.append(str(item))
+
+        raw_output = "\n".join(output_parts).strip() if output_parts else "Success."
+
+        # 7. Audit log action to actions.jsonl
+        result_status = "failed" if is_error else "success"
+        safety_engine.log_action(3, name, arguments, risk_level, result_status)
+
+        # 8. Prompt Injection Quarantine: wrap all external data in <MCP_DATA> tags
+        quarantined = sanitize_data_content(raw_output, "MCP_DATA")
+        return quarantined
+
+
+# --------------------------------------------------------------------------- Singleton & Global Access
+
+_GLOBAL_MCP_CLIENT: Optional[WindowsMcpClient] = None
+_CLIENT_LOCK = threading.Lock()
+
+def get_mcp_client(exe_path: Optional[str] = None) -> WindowsMcpClient:
+    """Retrieve or create the global WindowsMcpClient instance."""
+    global _GLOBAL_MCP_CLIENT
+    with _CLIENT_LOCK:
+        if _GLOBAL_MCP_CLIENT is None:
+            _GLOBAL_MCP_CLIENT = WindowsMcpClient(exe_path=exe_path)
+        return _GLOBAL_MCP_CLIENT
+
+def init_mcp_client(exe_path: Optional[str] = None) -> WindowsMcpClient:
+    """Explicitly initialize and start the global MCP client."""
+    client = get_mcp_client(exe_path)
+    client.start()
+    return client
+
+def shutdown_mcp_client() -> None:
+    """Stop the global MCP client subprocess if active."""
+    global _GLOBAL_MCP_CLIENT
+    with _CLIENT_LOCK:
+        if _GLOBAL_MCP_CLIENT is not None:
+            _GLOBAL_MCP_CLIENT.stop()
+            _GLOBAL_MCP_CLIENT = None

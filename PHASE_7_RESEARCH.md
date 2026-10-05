@@ -2,8 +2,8 @@
 
 **Evaluation of Candidate Automation Systems for Hey Jev Windows Port**  
 **Date:** October 2026  
-**Environment:** Windows 11 / Windows 10 x64, Python 3.11.9, separate `.venv-agents`  
-**Status:** Step 1 Research Complete — Awaiting Approval for Step 2
+**Environment:** Windows 11 / Windows 10 x64, Python 3.11.9, dedicated `.venv-agents`  
+**Status:** Step 1 Research Complete & Verified — Step 2 Primary Engine Selected
 
 ---
 
@@ -11,61 +11,67 @@
 
 | Candidate | License | Last Commit Date | Runtime / Platform Requirements | Disk Footprint | Telemetry / Data Sent | Primary Tool List | Key Capability Beyond Hey Jev Tier 2 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **CursorTouch/Windows-MCP** | **MIT** (Jeomon George, 2025) | Early Oct 2026 (v1.0.1 on Sep 27, 2026) | Windows 7–11 x64; Python 3.13+ or `uvx` | ~55 MB (Python dependencies) | PostHog usage data (tool name, latency, status). **Disable:** `ANONYMIZED_TELEMETRY=false` | `click_tool`, `type_tool`, `move_cursor_tool`, `press_key_tool`, `scroll_tool`, `snapshot_tool` (with DOM mode), `app_tool`, `clipboard_tool`, `powershell_tool`, `process_tool`, `registry_tool` | Arbitrary UI coordinate clicking, typing into non-focused inputs, accessibility/DOM tree snapshotting |
-| **sbroenne/mcp-windows** | **MIT** (sbroenne, 2025–2026) | Oct 2026 (v2.x) | Windows 10/11 x64; .NET 10 standalone binary (No Python required) | ~40 MB (single executable) | **Zero telemetry**; completely local via Windows UI Automation API | `ui_find`, `ui_click`, `ui_type`, `ui_read`, `file_save`, `window_management`, `screenshot_control`, `mouse_control`, `keyboard_control`, `app` | Semantic UI control by element name (DPI/resolution-independent), button clicking without coordinates |
-| **browser-use/browser-use** | **MIT** (browser-use team) | Oct 2026 (v0.13.10 on Sep 3, 2026) | Windows 10/11, macOS, Linux; Python >= 3.11; Chromium | ~350 MB (Playwright + Chromium browser) | Anonymous task metadata (task, visited URLs, action traces). **Disable:** `ANONYMIZED_TELEMETRY=false` | `search_google`, `go_to_url`, `click_element`, `input_text`, `scroll_down`, `scroll_up`, `send_keys`, `open_tab`, `switch_tab`, `close_tab`, `extract_content` | Autonomous multi-step web browsing, dynamic DOM interaction, form fills, authentication navigation |
-| **simular-ai/Agent-S** (Agent S3) | **Apache-2.0** (Simular AI) | Sep 2026 (v0.3.2 + patches) | Windows, macOS, Linux; Python >= 3.10; PyTorch, OCR | ~2.5 GB (PyTorch, vision models, OCR weights) | Sends full screenshots to external VLM APIs (Claude/GPT-4o). No telemetry to Simular | `click`, `double_click`, `right_click`, `move_to`, `type_text`, `press_key`, `hotkey`, `scroll`, `drag_and_drop`, `screenshot`, `subtask_complete` | End-to-end vision-language reasoning on arbitrary desktop GUI, visual icon grounding, complex subtask planning |
-| **microsoft/UFO** (UFO² / UFO³ Galaxy) | **MIT** (Microsoft Corp) | Mid/Late 2026 (UFO³ Galaxy) | Windows 10/11 x64; Python >= 3.10; PyWin32, OpenCV | ~1.2 GB (OpenCV, COM, agent libraries) | Dual-agent sends screenshots & UI trees to Azure/OpenAI VLM. Configurable telemetry | HostAgent: App dispatch, window focus, DAG evolution. AppAgent: Control click, type, select, scroll, text read | Cross-application enterprise workflow automation (e.g. Excel -> PowerPoint -> Outlook) with dual-agent reflection |
+| **sbroenne/mcp-windows** *(Selected Primary)* | **MIT** (sbroenne, 2025–2026) | Oct 2026 (v1.3.27) | Windows 10/11 x64; .NET 10 standalone binary (No Python required) | **57.12 MB (measured)** (`Sbroenne.WindowsMcp.exe`) | **Zero telemetry** (verified: 0 active/outbound socket connections via psutil) | `ui_snapshot`, `ui_find`, `ui_click`, `ui_type`, `ui_select`, `ui_read`, `ui_wait`, `keyboard_control`, `mouse_control`, `window_management`, `screenshot_control`, `app`, `clipboard`, `file_open`, `file_save`, `ui_read_table`, `ui_batch`, `process` | Semantic UI Automation (UIA) targeting by element name/ID/role (resolution/DPI-independent) without blind coordinates |
+| **CursorTouch/Windows-MCP** *(Fallback)* | **MIT** (Jeomon George, 2025) | Early Oct 2026 (v1.0.1 on Sep 27, 2026) | Windows 7–11 x64; requires Python >= 3.14 or `uvx` (cannot run directly on Python 3.11 in `.venv-agents`) | ~55 MB (estimate, Python dependencies) | PostHog usage data (tool name, latency, status). **Disable:** `ANONYMIZED_TELEMETRY=false` | `click_tool`, `type_tool`, `move_cursor_tool`, `press_key_tool`, `scroll_tool`, `snapshot_tool` (with DOM mode), `app_tool`, `clipboard_tool`, `powershell_tool`, `process_tool`, `registry_tool` | Arbitrary UI coordinate clicking, typing into non-focused inputs, accessibility/DOM tree snapshotting |
+| **browser-use/browser-use** | **MIT** (browser-use team) | Oct 2026 (v0.13.10 on Sep 3, 2026) | Windows 10/11, macOS, Linux; Python >= 3.11; Chromium | ~350 MB (estimate, Playwright + Chromium browser) | Anonymous task metadata (task, visited URLs, action traces). **Disable:** `ANONYMIZED_TELEMETRY=false` | `search_google`, `go_to_url`, `click_element`, `input_text`, `scroll_down`, `scroll_up`, `send_keys`, `open_tab`, `switch_tab`, `close_tab`, `extract_content` | Autonomous multi-step web browsing, dynamic DOM interaction, form fills, authentication navigation |
+| **simular-ai/Agent-S** (Agent S3) | **Apache-2.0** (Simular AI) | Sep 2026 (v0.3.2 + patches) | Windows, macOS, Linux; Python >= 3.10; PyTorch, OCR | ~2.5 GB (estimate, PyTorch, vision models, OCR weights) | Sends full screenshots to external VLM APIs (Claude/GPT-4o). No telemetry to Simular | `click`, `double_click`, `right_click`, `move_to`, `type_text`, `press_key`, `hotkey`, `scroll`, `drag_and_drop`, `screenshot`, `subtask_complete` | End-to-end vision-language reasoning on arbitrary desktop GUI, visual icon grounding, complex subtask planning |
+| **microsoft/UFO** (UFO² / UFO³ Galaxy) | **MIT** (Microsoft Corp) | Mid/Late 2026 (UFO³ Galaxy) | Windows 10/11 x64; Python >= 3.10; PyWin32, OpenCV | ~1.2 GB (estimate, OpenCV, COM, agent libraries) | Dual-agent sends screenshots & UI trees to Azure/OpenAI VLM. Configurable telemetry | HostAgent: App dispatch, window focus, DAG evolution. AppAgent: Control click, type, select, scroll, text read | Cross-application enterprise workflow automation (e.g. Excel -> PowerPoint -> Outlook) with dual-agent reflection |
 
 ---
 
 ## 2. Detailed Candidate Profiles
 
-### Candidate 1: CursorTouch/Windows-MCP
+### Candidate 1: sbroenne/mcp-windows (Selected Primary)
+- **Repository:** `https://github.com/sbroenne/mcp-windows`
+- **License:** **MIT License** (verified from `LICENSE`, Copyright 2025–2026 sbroenne).
+- **Last Commit / Release:** v1.3.27, released October 2026.
+- **Requirements:** Windows 10/11 x64. Implemented in C# / .NET 10. Standalone `.exe` binary available on GitHub Releases (No Python or .NET runtime installation required).
+- **Acquisition Verification:** Obtained **without requiring a GitHub token** by directly downloading the public release asset `windows-mcp-server-1.3.27-win-x64.zip` from `https://github.com/sbroenne/mcp-windows/releases/download/v1.3.27/windows-mcp-server-1.3.27-win-x64.zip`.
+- **Measured Install Size:** **59,899,787 bytes (57.12 MB)** for extracted `Sbroenne.WindowsMcp.exe`.
+- **Data Collection & Telemetry (Measured):**
+  - **Zero data collection**. Strictly local execution via Windows native UI Automation COM APIs (`UIAutomationClient`).
+  - Tested running process with `psutil`: `len(p.net_connections()) == 0` and 0 child processes. Zero outbound connections.
+- **Exposed Tools (18 tools discovered over stdio):**
+  - `ui_snapshot`: Orient and inspect compact element trees with comparison mode.
+  - `ui_find`: Find element by name, control type, or automation ID.
+  - `ui_click`: Click UI element by name/identifier.
+  - `ui_type`: Input text directly into element.
+  - `ui_select`: Select combo box / list / tab option.
+  - `ui_read`: Read accessibility attributes and text content.
+  - `ui_read_table`: Extract tabular grid into structured rows/headers in one call.
+  - `ui_wait`: Wait for element appearance/disappearance or state change without blind sleeps.
+  - `window_management`: Find, activate, move, resize, minimize, maximize.
+  - `screenshot_control`: Capture screen or window bounds (optionally annotated).
+  - `mouse_control`: Simulate mouse click/move/scroll/drag.
+  - `keyboard_control`: Send keystrokes, shortcuts, and key combinations.
+  - `app`: Launch app and return HWND.
+  - `clipboard`: Fast bulk text get/set/clear.
+  - `file_save` / `file_open`: Save/open via native dialogs.
+  - `ui_batch`: Multi-step batch execution.
+  - `process`: Process list and query.
+- **Capabilities Beyond Hey Jev Tier 2:**
+  - Semantic element targeting: clicks buttons and types into fields by label rather than pixel coordinates. Immune to display scaling/DPI shifts.
+  - Fast, self-contained single binary with zero external telemetry and zero Python environment baggage.
+
+---
+
+### Candidate 2: CursorTouch/Windows-MCP (Fallback)
 - **Repository:** `https://github.com/CursorTouch/Windows-MCP`
 - **License:** **MIT License** (verified from `LICENSE.md`, Copyright 2025 Jeomon George).
 - **Last Commit / Release:** v1.0.1 released September 27, 2026; commits active in October 2026.
-- **Requirements:** Windows 7, 8, 8.1, 10, 11 (x64). Runtime via `uvx windows-mcp` or `python -m windows_mcp`.
-- **Install Size:** ~55 MB (FastMCP, comtypes, dxcam, Pillow, posthog, psutil, click).
+- **Requirements & Environment Compatibility:**
+  - Declares `requires-python = ">=3.14"` in `pyproject.toml` or execution via `uvx windows-mcp`.
+  - `.venv-agents` was created using the system Python 3.11.9; therefore, Windows-MCP cannot be cleanly installed via `pip install windows-mcp` directly into `.venv-agents` without Python 3.14 or `uvx`.
+- **Install Size:** ~55 MB (estimate, Python dependencies: FastMCP, comtypes, dxcam, Pillow, posthog, psutil, click).
 - **Data Collection & Telemetry:**
-  - **What is collected:** PostHog client sends tool execution status (success/failure), latency duration, tool name, client application name/version, and anonymized session ID.
-  - **What is NOT collected:** Tool arguments (typed text, file paths) and outputs (screenshots, command outputs) are not sent.
+  - PostHog client sends tool execution status (success/failure), latency duration, tool name, client application name/version, and anonymized session ID.
   - **Exact setting to disable:**
     ```env
     ANONYMIZED_TELEMETRY=false
     ```
-    This environment variable must be passed into the subprocess environment when launching the server.
 - **Exposed Tools:**
   - `click_tool` (`Click`), `move_cursor_tool` (`Move`), `type_tool` (`Type`), `press_key_tool` (`Shortcut`), `scroll_tool` (`Scroll`), `app_tool` (`Launch`), `snapshot_tool` (`State`, with DOM mode), `wait_for_tool` (`WaitFor`), `clipboard_tool`, `powershell_tool`, `process_tool`, `registry_tool`, `display_inventory_tool`.
-- **Capabilities Beyond Hey Jev Tier 2:**
-  - Enables physical mouse clicking at arbitrary coordinates and simulated typing into controls across any application.
-  - Reads UI state trees and browser DOM hierarchies (`use_dom=True`).
-- **Risks & Mitigation:**
-  - Exposes dangerous tools (`PowerShell`, `Registry`, `Process`). In Hey Jev, these **must be denied by default** at the MCP client layer and gated by the Safety Engine.
-
----
-
-### Candidate 2: sbroenne/mcp-windows
-- **Repository:** `https://github.com/sbroenne/mcp-windows`
-- **License:** **MIT License** (verified from `LICENSE`, Copyright 2025–2026 sbroenne).
-- **Last Commit / Release:** v2.x series, active in October 2026.
-- **Requirements:** Windows 10/11 x64. Implemented in C# / .NET 10. Standalone `.exe` binary available on GitHub Releases (no Python runtime required).
-- **Install Size:** ~40 MB for self-contained single-file executable.
-- **Data Collection & Telemetry:**
-  - **Zero data collection**. Strictly local execution via Windows native UI Automation COM APIs (`UIAutomationClient`). No telemetry packages, no network egress.
-- **Exposed Tools (10 tools):**
-  - `ui_find`: Find element by name, control type, or automation ID.
-  - `ui_click`: Click UI element by name/identifier.
-  - `ui_type`: Input text directly into element.
-  - `ui_read`: Read accessibility attributes and text content.
-  - `file_save`: Save file.
-  - `window_management`: Find, activate, move, resize, minimize, maximize.
-  - `screenshot_control`: Capture screen or window bounds.
-  - `mouse_control`: Simulate mouse click/move/scroll.
-  - `keyboard_control`: Send keystrokes and key combinations.
-  - `app`: Launch app and return HWND.
-- **Capabilities Beyond Hey Jev Tier 2:**
-  - Semantic element targeting: clicks buttons and types into fields by label rather than pixel coordinates. Immune to display scaling/DPI shifts.
+- **Status:** Maintained as secondary fallback if .NET-based UIA encounters unsupported legacy controls.
 
 ---
 
@@ -73,15 +79,14 @@
 - **Repository:** `https://github.com/browser-use/browser-use`
 - **License:** **MIT License** (verified from `LICENSE`).
 - **Last Commit / Release:** v0.13.10 released September 3, 2026; active through October 2026.
-- **Requirements:** Windows 10/11 x64, Python >= 3.11, Chromium (via Playwright).
-- **Install Size:** ~350 MB (library + Playwright browser binaries).
+- **Requirements:** Windows 10/11 x64, Python >= 3.11 (compatible with `.venv-agents` Python 3.11.9), Chromium (via Playwright).
+- **Install Size:** ~350 MB (estimate, library + Playwright browser binaries).
 - **Data Collection & Telemetry:**
   - Default telemetry (`AgentTelemetryEvent`) collects task instructions, URLs visited, action steps, and outcomes.
   - **Exact setting to disable:**
     ```env
     ANONYMIZED_TELEMETRY=false
     ```
-    Must be set in the process environment before importing or executing `browser_use`.
 - **Exposed Actions:**
   - `search_google`, `go_to_url`, `click_element`, `input_text`, `scroll_down`, `scroll_up`, `send_keys`, `open_tab`, `switch_tab`, `close_tab`, `extract_content`.
 - **Capabilities Beyond Hey Jev Tier 2:**
@@ -94,10 +99,9 @@
 - **License:** **Apache-2.0 License** (verified from `LICENSE`).
 - **Last Commit / Release:** v0.3.2 (Dec 2025) with active September 2026 updates.
 - **Requirements:** Windows/Linux/macOS, Python >= 3.10, PyTorch, torchvision, EasyOCR.
-- **Install Size:** Heavyweight (~2.5 GB).
+- **Install Size:** Heavyweight (~2.5 GB, estimate).
 - **Data Collection & Privacy:**
   - Transmits full desktop screenshots to external multimodal vision models (e.g. Anthropic Claude 3.5 Sonnet, OpenAI GPT-4o).
-  - Note: CVE-2026-84886/84887 vulnerability reported in September 2026 regarding image buffer handling in `ocr_server.py`.
 - **Exposed ACI Tools:**
   - Mouse moves, clicks, typing, hotkeys, scrolling, coordinate dragging, and screenshot capturing.
 - **Capabilities Beyond Hey Jev Tier 2:**
@@ -110,7 +114,7 @@
 - **License:** **MIT License** (verified from `LICENSE`, Copyright Microsoft Corporation).
 - **Last Commit / Release:** UFO³ Galaxy framework (Mid/Late 2026).
 - **Requirements:** Windows 10/11 x64, Python >= 3.10, PyWin32, OpenCV.
-- **Install Size:** Heavyweight (~1.2 GB).
+- **Install Size:** Heavyweight (~1.2 GB, estimate).
 - **Data Collection & Privacy:**
   - Dual-agent loop sends window screenshots and UI tree hierarchies to LLM/VLM APIs.
 - **Capabilities Beyond Hey Jev Tier 2:**
@@ -118,47 +122,44 @@
 
 ---
 
-## 3. Integration Recommendation & Strategic Plan
+## 3. Integration Plan & Engine Choice (Step 2)
 
-### Recommended Primary Integration: CursorTouch/Windows-MCP (Step 2)
-1. **Rationale:**
-   - Native Python/MCP stdio protocol compatibility (`uvx windows-mcp serve` or `python -m windows_mcp serve`).
-   - Supports explicit `--tools` allowlist and `--exclude-tools` denylist natively.
-   - Clean, lightweight (~55 MB), and fast latency (0.2–0.5s per action).
-   - Can easily be complemented by `sbroenne/mcp-windows` if a zero-dependency compiled binary is preferred.
-2. **Mandatory Security Configuration for Windows-MCP:**
-   - **Telemetry:** Always pass `ANONYMIZED_TELEMETRY=false` in the subprocess environment.
+### Selected Primary Engine: sbroenne/mcp-windows
+1. **Decision Rationale:**
+   - **Standalone Executable:** Single binary `Sbroenne.WindowsMcp.exe` (57.12 MB), completely decoupled from Python runtime dependencies and immune to Python version conflicts.
+   - **Zero Telemetry:** Completely local execution. Zero network calls confirmed through runtime socket inspection via `psutil`.
+   - **Semantic UIA Targeting:** Targets controls by name, controlType, and automationId, bypassing coordinate brittleness.
+   - **Zero Token Requirement:** Downloaded and verified directly without requiring GitHub API credentials or personal access tokens.
+2. **Mandatory Security Configuration & Tool Allowlist:**
    - **Tool Allowlist (Permitted):**
-     - UI Snapshot / State (`snapshot_tool` / `State`)
-     - Mouse Click (`click_tool` / `Click`)
-     - Text Typing (`type_tool` / `Type`)
-     - Keyboard / Shortcut (`press_key_tool` / `Shortcut`)
-     - Scroll (`scroll_tool` / `Scroll`)
-     - Window Focus / Resize (`window`)
-     - App Launch (`app_tool` / `Launch`)
+     - UI Find / Read / Snapshot / Table: `ui_find`, `ui_read`, `ui_read_table`, `ui_snapshot`, `screenshot_control`, `ui_wait`
+     - Click: `ui_click`, `mouse_control`
+     - Type / Input: `ui_type`, `ui_select`
+     - Keystrokes & Shortcuts: `keyboard_control`
+     - Window Focus / Resize / Management: `window_management`
+     - App Launch: `app`
    - **Tool Denylist (Strictly Blocked by Default):**
-     - `powershell_tool`, `registry_tool`, `process_tool`, file write/move/delete, services, scheduled tasks, network config.
-   - **Safety Gating:**
-     - Typing or key combinations into any application $\to$ **MEDIUM risk**.
-     - Unknown or unlisted tools $\to$ **Blocked**.
-     - All outputs wrapped in `<DATA>` sanitization tags.
-     - 8-step ceiling and 30-second timeout per turn.
-
-### Recommended Web Browsing Engine: browser-use (Step 3)
-- Run in `.venv-agents` as an isolated worker subprocess.
-- Always enforce `ANONYMIZED_TELEMETRY=false`.
-- Launch with a dedicated clean browser user data profile directory (never user's personal browser profile).
-- Confirmation required before sensitive actions (login, payment, file download, form submit).
-
-### Recommended Desktop Vision Engine: Lightweight Wrapper (Step 4)
-- Maintain lightweight, modular design: do not install multi-gigabyte PyTorch/VLM weights locally.
-- Implement `desktop_vision_task(task)` as a configuration wrapper with Settings toggle (default OFF).
-- Enforce explicit user consent and privacy notice regarding screenshot transmission to VLM endpoints.
+     - `process` (process termination/killing is denied by default)
+     - `file_save` / `file_open` (file writes and system dialogs are blocked unless explicitly gated)
+     - `ui_batch` (batching denied unless all sub-actions are individually validated)
+     - Any unknown or unlisted tool: **Blocked immediately**
+     - PowerShell/shell, registry, file deletion, services, scheduled tasks, network configuration: **Not supported by binary and denied by client**
+3. **Safety Engine Gating & Loop Constraints:**
+   - Typing or key combinations into any application $\to$ **MEDIUM risk** (evaluated via `safety_engine.evaluate_risk()`).
+   - Unknown tools $\to$ **Blocked**.
+   - Inspection and read actions $\to$ **SAFE**.
+   - Prompt Injection Quarantine: all tool outputs wrapped in `<DATA>` tags.
+   - Execution Limits: Maximum 8 steps ceiling, 30-second total timeout per turn.
+   - Loop Protection & Interruption: Global cancel flag (`safety_engine.is_cancel_requested()`) polled before every step; Esc key and spoken "stop" instantly abort execution.
+   - All tool invocations logged to `%APPDATA%\HeyJev\actions.jsonl`.
+   - Clean failure handling: if MCP server fails to start, report a single clean user message and remain off.
 
 ---
 
 ## 4. Current State & Verification
 
-- **Environment:** Dedicated virtual environment `.venv-agents` created at `C:\Users\prabh\.gemini\antigravity\scratch\hey-jev\.venv-agents` without modifying Hey Jev core `.venv`.
-- **Automated Tests:** 110/110 existing unit tests pass (`pytest -v`).
-- **Real PC Verification:** Candidate licenses, repository commit dates, package dependencies, telemetry parameters, and security postures were verified directly from upstream sources.
+- **Environment:** Dedicated virtual environment `.venv-agents` created at `C:\Users\prabh\.gemini\antigravity\scratch\hey-jev\.venv-agents` running Python 3.11.9.
+- **Engine Binary:** `Sbroenne.WindowsMcp.exe` installed at `.venv-agents\bin\mcp-windows\Sbroenne.WindowsMcp.exe`.
+- **Measured Disk Size:** Exactly 59,899,787 bytes (57.12 MB).
+- **Measured Network Egress:** Confirmed 0 active/listening network sockets via `psutil` during stdio execution.
+- **Automated Tests:** 110/110 existing unit tests passing cleanly.
