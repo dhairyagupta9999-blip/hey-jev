@@ -352,14 +352,42 @@ class ConfirmationManager:
             self.pending_confirmation = None
             return True, f"Action cancelled ({reason})."
 
+    def has_pending(self) -> bool:
+        """Return True if an action or confirmation is actively pending."""
+        with self._lock:
+            return self.pending_confirmation is not None
+
+
 
 _GLOBAL_CONFIRMATION_MANAGER: Optional[ConfirmationManager] = None
+_CANCEL_EVENT = threading.Event()
 
 def get_confirmation_manager() -> ConfirmationManager:
     global _GLOBAL_CONFIRMATION_MANAGER
     if _GLOBAL_CONFIRMATION_MANAGER is None:
         _GLOBAL_CONFIRMATION_MANAGER = ConfirmationManager()
     return _GLOBAL_CONFIRMATION_MANAGER
+
+def request_global_cancel(reason: str = "stop") -> bool:
+    """Signal global cancellation of running actions, confirmations, or agent loops."""
+    _CANCEL_EVENT.set()
+    cm = get_confirmation_manager()
+    if cm.has_pending():
+        cm.cancel_pending(reason)
+        return True
+    return False
+
+def is_cancel_requested() -> bool:
+    """Check if cancellation was signaled."""
+    return _CANCEL_EVENT.is_set()
+
+def check_and_clear_cancel() -> bool:
+    """Clear and return previous cancellation state."""
+    if _CANCEL_EVENT.is_set():
+        _CANCEL_EVENT.clear()
+        return True
+    return False
+
 
 
 # --------------------------------------------------------------------------- Safe File Operations

@@ -148,6 +148,11 @@ class MainWindow(QMainWindow):
         self.quit_shortcut.setContext(Qt.WindowShortcut)
         self.quit_shortcut.activated.connect(self._quit_application)
 
+        # Esc shortcut to cancel current action / confirmation
+        self.esc_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.esc_shortcut.setContext(Qt.ApplicationShortcut)
+        self.esc_shortcut.activated.connect(self._on_esc_pressed)
+
         # Timer countdown tick
         self.tick_timer = QTimer(self)
         self.tick_timer.timeout.connect(self._on_timer_tick)
@@ -391,6 +396,17 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, cur)
         self.show()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            from safety_engine import get_confirmation_manager
+            cm = get_confirmation_manager()
+            cancelled, msg = cm.cancel_pending("Esc key pressed")
+            if cancelled:
+                self.tray.showMessage("Hey Jev", msg, QSystemTrayIcon.Information, 2000)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _show_about_dialog(self):
         msg = (
@@ -647,10 +663,32 @@ class MainWindow(QMainWindow):
                 "OpenCode Zen is not contacted."
             )
         msg += ans_text
+
+        t3_on = self.settings.get("tier3_enabled", False)
+        t3_prov = self.settings.get("tier3_provider", "openrouter")
+        t3_cap = self.settings.get("tier3_daily_spend_cap", 0.10)
+        t3_status = "ENABLED" if t3_on else "OFF (Default)"
+        t3_prov_name = "OpenCode Zen (free)" if t3_prov == "opencode_zen" else "OpenRouter (Claude Haiku)"
+        t3_text = (
+            f"<br><br><b>Tier 3 PC Control Agent ('Let Jev do anything'): {t3_status}</b><br>"
+            f"• <b>Status:</b> {t3_status} (Provider: {t3_prov_name}, Daily Cap: ${t3_cap:.2f}).<br>"
+            "• <b>What Tier 3 Sends:</b> When enabled, Tier 3 sends the spoken user prompt and only the specific "
+            "tool execution context required to fulfill the request (e.g., active window title or specific file search query) "
+            "to the configured agent model endpoint. Zero audio is transmitted.<br>"
+            "• <b>Prompt Injection Quarantine:</b> External data (files, window text, clipboard, web results) is strictly "
+            "quarantined inside &lt;DATA&gt; tags with prompt-injection tokens redacted, preventing untrusted text from executing as instructions.<br>"
+            "• <b>Confirmation Safety:</b> High-risk operations (PowerShell commands, file deletions, 'close everything', system power) "
+            "always require explicit confirmation and default to NO after 8 seconds. Pressing Esc or saying 'stop' immediately halts the action."
+        )
+        msg += t3_text
         self.privacy_text.setText(msg)
 
     # ---------------- Tab 6: Settings ----------------
     def _create_settings_tab(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(14, 14, 14, 14)
@@ -705,6 +743,53 @@ class MainWindow(QMainWindow):
         ans_lay.addRow("Answer Provider:", self.ans_combo)
 
         lay.addWidget(ans_group)
+
+        # Tier 3 Agent Group ("Do Anything" Layer)
+        t3_group = QGroupBox("Open-Vocabulary Agent ('Do Anything' Mode)")
+        t3_lay = QFormLayout(t3_group)
+
+        self.chk_tier3 = QCheckBox("Let Jev do anything (AI agent)")
+        self.chk_tier3.setChecked(self.settings.get("tier3_enabled", False))
+        self.chk_tier3.toggled.connect(self._on_tier3_toggled)
+        t3_lay.addRow(self.chk_tier3)
+
+        self.t3_provider_combo = QComboBox()
+        self.t3_provider_combo.addItem("OpenRouter (Claude Haiku - Default)", "openrouter")
+        self.t3_provider_combo.addItem("OpenCode Zen (free)", "opencode_zen")
+        cur_t3 = self.settings.get("tier3_provider", "openrouter")
+        self.t3_provider_combo.setCurrentIndex(1 if cur_t3 == "opencode_zen" else 0)
+        self.t3_provider_combo.currentIndexChanged.connect(self._on_tier3_provider_changed)
+        t3_lay.addRow("Agent Model:", self.t3_provider_combo)
+
+        self.t3_spend_cap_spin = QDoubleSpinBox()
+        self.t3_spend_cap_spin.setRange(0.01, 10.00)
+        self.t3_spend_cap_spin.setSingleStep(0.05)
+        self.t3_spend_cap_spin.setPrefix("$")
+        self.t3_spend_cap_spin.setValue(self.settings.get("tier3_daily_spend_cap", 0.10))
+        self.t3_spend_cap_spin.valueChanged.connect(self._on_spend_cap_changed)
+        t3_lay.addRow("Daily Spend Cap:", self.t3_spend_cap_spin)
+
+        confirm_box = QGroupBox("Actions That Always Need Confirmation")
+        confirm_box_lay = QVBoxLayout(confirm_box)
+        confirm_items = [
+            "• Running PowerShell commands / scripts (run_powershell)",
+            "• Deleting files (moved to Recycle Bin with undo)",
+            "• Closing all windows / 'close everything' (close_all)",
+            "• System power operations (restart, shutdown, sleep)",
+            "• Launching executable files / installers (.exe, .bat, .ps1, .vbs)"
+        ]
+        for it in confirm_items:
+            lbl = QLabel(it)
+            lbl.setStyleSheet("color: #cbd5e1; font-size: 11px;")
+            confirm_box_lay.addWidget(lbl)
+
+        confirm_note = QLabel("<i>Confirmations default to NO after 8s. Press Esc key or say 'stop' to cancel.</i>")
+        confirm_note.setStyleSheet("color: #94a3b8; font-size: 10px; margin-top: 4px;")
+        confirm_box_lay.addWidget(confirm_note)
+
+        t3_lay.addRow(confirm_box)
+        lay.addWidget(t3_group)
+
         stt_group = QGroupBox("Speech-to-Text (STT)")
         stt_lay = QFormLayout(stt_group)
 
@@ -766,7 +851,8 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(win_group)
         lay.addStretch()
-        return w
+        scroll.setWidget(w)
+        return scroll
 
     def _on_backend_changed(self, idx: int):
         val = self.backend_combo.itemData(idx)
@@ -784,6 +870,25 @@ class MainWindow(QMainWindow):
         val = self.ans_combo.itemData(idx)
         self.settings["answer_provider"] = val
         os.environ["HEYJEV_ANSWER_PROVIDER"] = val
+        save_settings(self.settings)
+        self._update_privacy_text()
+
+    def _on_tier3_toggled(self, checked: bool):
+        self.settings["tier3_enabled"] = checked
+        os.environ["HEYJEV_TIER3_ENABLED"] = "1" if checked else "0"
+        save_settings(self.settings)
+        self._update_privacy_text()
+
+    def _on_tier3_provider_changed(self, idx: int):
+        val = self.t3_provider_combo.itemData(idx)
+        self.settings["tier3_provider"] = val
+        os.environ["HEYJEV_TIER3_PROVIDER"] = val
+        save_settings(self.settings)
+        self._update_privacy_text()
+
+    def _on_spend_cap_changed(self, val: float):
+        self.settings["tier3_daily_spend_cap"] = val
+        os.environ["HEYJEV_TIER3_DAILY_SPEND_CAP"] = str(val)
         save_settings(self.settings)
         self._update_privacy_text()
 
@@ -972,6 +1077,19 @@ class MainWindow(QMainWindow):
             self.timers_widget.show()
         except Exception:
             pass
+
+    def keyPressEvent(self, event):
+        """Esc key cancels pending safety confirmations and current actions."""
+        if event.key() == Qt.Key_Escape:
+            self._on_esc_pressed()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _on_esc_pressed(self):
+        from safety_engine import request_global_cancel
+        request_global_cancel("Esc key pressed")
+        self.signals.status_updated.emit("Cancelled", "Action cancelled by Esc key")
 
     def closeEvent(self, event):
         """Dock-hide parity: Close hides window to system tray; quit is explicit."""

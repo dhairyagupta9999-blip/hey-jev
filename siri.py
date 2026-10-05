@@ -398,9 +398,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
 
     # 1. Safety Hook: Stop / cancel commands
     if t_clean in ("stop", "cancel", "halt", "abort"):
-        from safety_engine import get_confirmation_manager
+        from safety_engine import get_confirmation_manager, request_global_cancel
         cm = get_confirmation_manager()
         cancelled, msg = cm.cancel_pending("user said stop")
+        request_global_cancel("user said stop")
         line = msg if cancelled else "Stopped."
         say(line, notify)
         emit(notify, "Ready", line)

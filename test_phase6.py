@@ -605,5 +605,143 @@ class TestPhase6VoiceLoopIntegration(unittest.TestCase):
                 self.assertTrue(any("reopening notepad" in s.lower() for s in spoken))
 
 
+class TestPhase6eSettingsAndRunbook(unittest.TestCase):
+    """Phase 6e tests for UI settings, cancellation hooks (Esc and 'stop'), and confirmation gating."""
+
+    def setUp(self):
+        import safety_engine
+        self.cm = safety_engine.get_confirmation_manager()
+        self.cm.cancel_pending("test setup")
+        safety_engine.check_and_clear_cancel()
+
+    def tearDown(self):
+        self.cm.cancel_pending("test teardown")
+
+    def test_01_esc_shortcut_cancels_pending_confirmation(self):
+        """Esc key via request_global_cancel immediately cancels pending confirmations."""
+        import safety_engine
+        executed = []
+        res = self.cm.request_high_risk_confirmation(
+            "run_powershell", "Execute script?", lambda: executed.append(True), timeout_s=5.0
+        )
+        self.assertTrue(res.get("needs_confirmation"))
+        self.assertTrue(self.cm.has_pending())
+
+        # Simulate Esc key action
+        cancelled = safety_engine.request_global_cancel("Esc key pressed")
+        self.assertTrue(cancelled)
+        self.assertFalse(self.cm.has_pending())
+        self.assertEqual(len(executed), 0)
+
+    def test_02_spoken_stop_cancels_in_voice_loop(self):
+        """Spoken 'stop' in voice loop cancels pending action and agent loop."""
+        import siri
+        import safety_engine
+        executed = []
+        self.cm.request_high_risk_confirmation(
+            "delete_file", "Delete file?", lambda: executed.append(True), timeout_s=5.0
+        )
+        self.assertTrue(self.cm.has_pending())
+
+        spoken = []
+        with patch("siri.say", side_effect=lambda l, n=None: spoken.append(l)):
+            siri.handle("stop")
+            self.assertFalse(self.cm.has_pending())
+            self.assertEqual(len(executed), 0)
+            self.assertTrue(any("action cancelled" in s.lower() or "stopped" in s.lower() for s in spoken))
+
+    def test_03_settings_tier3_toggle_and_spend_cap(self):
+        """Settings tab toggles Tier 3 enabled flag, agent provider, and spend cap."""
+        import assistant_ui
+        settings = assistant_ui.load_settings()
+        self.assertIn("tier3_enabled", settings)
+        self.assertIn("tier3_daily_spend_cap", settings)
+        self.assertIn("tier3_always_confirm", settings)
+        self.assertIn("delete_file", settings["tier3_always_confirm"])
+
+        # Test settings callbacks
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+
+        with patch.object(assistant_ui.MainWindow, "_start_worker"):
+            win = assistant_ui.MainWindow()
+            try:
+                win._on_tier3_toggled(True)
+                self.assertTrue(win.settings["tier3_enabled"])
+                self.assertEqual(os.environ.get("HEYJEV_TIER3_ENABLED"), "1")
+
+                win._on_spend_cap_changed(0.25)
+                self.assertEqual(win.settings["tier3_daily_spend_cap"], 0.25)
+                self.assertEqual(os.environ.get("HEYJEV_TIER3_DAILY_SPEND_CAP"), "0.25")
+
+                win._on_tier3_toggled(False)
+                self.assertFalse(win.settings["tier3_enabled"])
+            finally:
+                win.close()
+
+    def test_04_privacy_tab_contains_tier3_details(self):
+        """Privacy tab explicitly discloses Tier 3 data minimization, quarantine, and safety gating."""
+        import assistant_ui
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication([])
+
+        with patch.object(assistant_ui.MainWindow, "_start_worker"):
+            win = assistant_ui.MainWindow()
+            try:
+                win._update_privacy_text()
+                txt = win.privacy_text.text()
+                self.assertIn("Tier 3 PC Control Agent", txt)
+                self.assertIn("What Tier 3 Sends", txt)
+                self.assertIn("&lt;DATA&gt;", txt)
+                self.assertIn("Daily Cap", txt)
+                self.assertIn("Confirmation Safety", txt)
+                self.assertIn("Pressing Esc or saying 'stop'", txt)
+            finally:
+                win.close()
+
+    def test_05_confirmation_timeout_defaults_to_no(self):
+        """Confirmation times out after timeout_s and defaults to NO when user attempts late confirmation."""
+        executed = []
+        self.cm.request_high_risk_confirmation(
+            "delete_file", "Delete file?", lambda: executed.append(True), timeout_s=0.1
+        )
+        time.sleep(0.2)
+        success, msg = self.cm.respond("yes")
+        self.assertFalse(success)
+        self.assertIn("timed out", msg.lower())
+        self.assertEqual(len(executed), 0)
+
+    def test_06_tier3_agent_honors_cancel_signal(self):
+        """Tier 3 tool loop immediately halts when global cancel is requested."""
+        import tier3_agent
+        import safety_engine
+        safety_engine.request_global_cancel("test cancel")
+        self.assertTrue(safety_engine.is_cancel_requested())
+
+        # If cancel was signaled, run_tier3_agent breaks with 'Action cancelled.'
+        with patch("tier3_agent.get_secret", return_value="sk-test-key"):
+            with patch("tier3_agent.is_spend_cap_exceeded", return_value=(False, 0.0, 0.10)):
+                # Mock requests.post to simulate mid-loop cancel
+                def mock_post(*args, **kwargs):
+                    safety_engine.request_global_cancel("mid-turn cancel")
+                    mock_resp = MagicMock()
+                    mock_resp.json.return_value = {
+                        "choices": [{
+                            "message": {
+                                "role": "assistant",
+                                "tool_calls": [{"id": "c1", "function": {"name": "list_windows", "arguments": "{}"}}]
+                            }
+                        }]
+                    }
+                    mock_resp.status_code = 200
+                    return mock_resp
+
+                with patch("requests.post", side_effect=mock_post):
+                    res = tier3_agent.run_tier3_agent("close all windows")
+                    self.assertIsNotNone(res)
+                    self.assertIn("cancelled", res["line"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()
+

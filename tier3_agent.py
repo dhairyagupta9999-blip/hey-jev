@@ -31,7 +31,10 @@ import ctypes
 from config import APPDATA_DIR
 from secrets_store import get_secret
 import safety_engine
-from safety_engine import get_confirmation_manager, log_action, sanitize_data_content, SAFE, MEDIUM, HIGH
+from safety_engine import (
+    get_confirmation_manager, log_action, sanitize_data_content,
+    SAFE, MEDIUM, HIGH, is_cancel_requested, check_and_clear_cancel
+)
 import logger
 
 # --------------------------------------------------------------------------- Spend Tracking
@@ -609,6 +612,7 @@ def run_tier3_agent(user_prompt: str) -> Optional[Dict[str, Any]]:
         }
 
     # 3. Tool-calling Loop (max 5 steps, 15s timeout)
+    check_and_clear_cancel()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt}
@@ -619,6 +623,10 @@ def run_tier3_agent(user_prompt: str) -> Optional[Dict[str, Any]]:
     final_line = ""
 
     while step < 5:
+        if is_cancel_requested():
+            final_line = "Action cancelled."
+            check_and_clear_cancel()
+            break
         step += 1
         elapsed = time.perf_counter() - t0
         if elapsed >= 15.0:
@@ -674,8 +682,14 @@ def run_tier3_agent(user_prompt: str) -> Optional[Dict[str, Any]]:
             final_line = msg.get("content", "").strip()
             break
 
+        cm = get_confirmation_manager()
         # Execute tool calls
         for tc in tool_calls:
+            if is_cancel_requested():
+                final_line = "Action cancelled."
+                check_and_clear_cancel()
+                break
+
             fn_info = tc.get("function", {})
             fn_name = fn_info.get("name")
             fn_args_raw = fn_info.get("arguments", "{}")
@@ -702,12 +716,11 @@ def run_tier3_agent(user_prompt: str) -> Optional[Dict[str, Any]]:
             })
 
             # If action requested high-risk confirmation, speak message and pause loop
-            cm = get_confirmation_manager()
             if cm.pending_confirmation and cm.pending_confirmation["state"]["aborted"] is False:
                 final_line = cm.pending_confirmation["message"]
                 break
 
-        if cm.pending_confirmation:
+        if is_cancel_requested() or cm.pending_confirmation:
             break
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
