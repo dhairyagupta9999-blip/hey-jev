@@ -88,8 +88,9 @@ def tool_open_app(name: str) -> str:
     from app_index import get_app_index
     import system_targets
     # Check system target first
-    sys_res = system_targets.resolve_system_target(name)
+    sys_res = system_targets.resolve_system_target(name, execute=False)
     if sys_res:
+        system_targets.execute_system_target(sys_res)
         log_action(3, f"system_{sys_res['type']}", {"target": sys_res["label"]}, SAFE, "success")
         return f"Opened {sys_res['label']}."
     idx = get_app_index()

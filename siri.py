@@ -310,9 +310,126 @@ def emit(notify, state, detail=""):
     if notify:
         notify(state, detail)
 
+# --------------------------------------------------------------------------- Loop & Echo Guards
+# Guard b: Ignore identical transcript within 5 seconds
+_LAST_TRANSCRIPT = ""
+_LAST_TRANSCRIPT_TIME = 0.0
+_TRANSCRIPT_DEDUP_WINDOW_S = 5.0
+
+def check_and_update_transcript_dedup(text: str, current_time: float = None) -> bool:
+    """Return True if transcript should be ignored as duplicate within 5s, else False."""
+    global _LAST_TRANSCRIPT, _LAST_TRANSCRIPT_TIME
+    if current_time is None:
+        current_time = time.time()
+    t_norm = text.lower().strip()
+    if not t_norm:
+        return False
+    if t_norm == _LAST_TRANSCRIPT and (current_time - _LAST_TRANSCRIPT_TIME) < _TRANSCRIPT_DEDUP_WINDOW_S:
+        return True
+    _LAST_TRANSCRIPT = t_norm
+    _LAST_TRANSCRIPT_TIME = current_time
+    return False
+
+def reset_transcript_dedup():
+    global _LAST_TRANSCRIPT, _LAST_TRANSCRIPT_TIME
+    _LAST_TRANSCRIPT = ""
+    _LAST_TRANSCRIPT_TIME = 0.0
+
+
+# Guard c: Loop breaker (same action 3 times within 10 seconds)
+_ACTION_FIRING_HISTORY = collections.deque(maxlen=30)  # (action_key, timestamp)
+_LOOP_BREAKER_WINDOW_S = 10.0
+_LOOP_BREAKER_THRESHOLD = 3
+_DISABLE_WAKE_FN = None
+
+def set_disable_wake_fn(fn):
+    global _DISABLE_WAKE_FN
+    _DISABLE_WAKE_FN = fn
+
+def disable_wake_mode():
+    global _DISABLE_WAKE_FN
+    if callable(_DISABLE_WAKE_FN):
+        try:
+            _DISABLE_WAKE_FN()
+        except Exception as e:
+            print(f"  [loop breaker] error disabling wake mode: {e}")
+
+def record_and_check_action_loop(action_key: str, current_time: float = None) -> bool:
+    """Check if the same action has fired 3 times within 10 seconds.
+    
+    Returns True if a loop is detected (i.e. this would be the 3rd firing in 10s),
+    indicating execution must halt.
+    """
+    global _ACTION_FIRING_HISTORY
+    if current_time is None:
+        current_time = time.time()
+    cutoff = current_time - _LOOP_BREAKER_WINDOW_S
+    while _ACTION_FIRING_HISTORY and _ACTION_FIRING_HISTORY[0][1] < cutoff:
+        _ACTION_FIRING_HISTORY.popleft()
+    count = sum(1 for k, t in _ACTION_FIRING_HISTORY if k == action_key)
+    _ACTION_FIRING_HISTORY.append((action_key, current_time))
+    return (count + 1) >= _LOOP_BREAKER_THRESHOLD
+
+def reset_action_loop_history():
+    global _ACTION_FIRING_HISTORY
+    _ACTION_FIRING_HISTORY.clear()
+
+def trigger_loop_breaker(notify=None):
+    msg = "I think I'm looping, stopping now"
+    print(f"\n  [loop guard c] {msg}. Turning off wake mode.")
+    trace_line(f"  [loop guard c] loop breaker triggered: turning wake mode off")
+    disable_wake_mode()
+    say(msg, notify)
+    emit(notify, "Ready", msg)
+
+
+# Guard d: Ignore transcripts matching assistant's own recent spoken replies
+_RECENT_ASSISTANT_REPLIES = collections.deque(maxlen=20)  # (normalized_text, timestamp)
+_RECENT_REPLIES_WINDOW_S = 15.0
+
+def record_spoken_reply(line: str, timestamp: float = None):
+    if timestamp is None:
+        timestamp = time.time()
+    clean = re.sub(r"\[.*?\]", "", line).lower().strip(" .,!?")
+    if clean:
+        _RECENT_ASSISTANT_REPLIES.append((clean, timestamp))
+
+def is_matching_recent_reply(transcript: str, current_time: float = None) -> bool:
+    """Check if transcript matches any reply spoken by the assistant in recent window."""
+    if current_time is None:
+        current_time = time.time()
+    t_clean = re.sub(r"\[.*?\]", "", transcript).lower().strip(" .,!?")
+    if not t_clean:
+        return False
+    cutoff = current_time - _RECENT_REPLIES_WINDOW_S
+    for reply_clean, t_reply in list(_RECENT_ASSISTANT_REPLIES):
+        if t_reply < cutoff:
+            continue
+        # Exact match
+        if t_clean == reply_clean:
+            return True
+        # Substring match (for phrases of reasonable length, avoiding single words like yes/no)
+        if len(t_clean) >= 6 and len(reply_clean) >= 6 and t_clean not in ("yes", "no"):
+            if t_clean in reply_clean or reply_clean in t_clean:
+                return True
+        # Fuzzy match
+        try:
+            from rapidfuzz import fuzz
+            if fuzz.ratio(t_clean, reply_clean) >= 80:
+                return True
+        except ImportError:
+            pass
+    return False
+
+def reset_spoken_replies():
+    global _RECENT_ASSISTANT_REPLIES
+    _RECENT_ASSISTANT_REPLIES.clear()
+
+
 def say(line, notify=None):
     trace_say(line)
     emit(notify, "Speaking", line)
+    record_spoken_reply(line)
     try:
         tts_ms = speak(line)
         trace_fish(tts_ms)
@@ -344,7 +461,7 @@ def is_tier2_direct_match(text: str) -> bool:
         return True
 
     # 3. System targets (settings URIs, folders, administrative tools, direct URLs)
-    sys_res = system_targets.resolve_system_target(t)
+    sys_res = system_targets.resolve_system_target(t, execute=False)
     if sys_res:
         # Exclude if it resolved to a known site that is an app in APPS (e.g. spotify)
         if sys_res.get("type") == "website" and sys_res.get("label", "").lower() in APPS:
@@ -394,6 +511,18 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         emit(notify, "Ready", "Didn't catch anything")
         return
 
+    # Guard b: Ignore duplicate transcript within 5 seconds
+    if check_and_update_transcript_dedup(text):
+        print(f"  [loop guard b] Ignoring duplicate transcript within 5.0s: {text!r}")
+        trace_line(f"  [loop guard b] dropped identical transcript: {text!r}")
+        return
+
+    # Guard d: Ignore transcript matching recent assistant spoken replies
+    if is_matching_recent_reply(text):
+        print(f"  [loop guard d] Ignoring transcript matching recent assistant reply: {text!r}")
+        trace_line(f"  [loop guard d] dropped reply echo: {text!r}")
+        return
+
     t_clean = text.lower().strip()
 
     # 1. Safety Hook: Stop / cancel commands
@@ -430,6 +559,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         from tier2_resolver import resolve_tier2
         t2_res = resolve_tier2(text)
         if t2_res is not None:
+            action_key = f"tier2:{t2_res.get('action')}:{t2_res.get('target')}"
+            if record_and_check_action_loop(action_key):
+                trigger_loop_breaker(notify)
+                return
             handle_tier2_result(t2_res, notify)
             return
 
@@ -461,6 +594,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         from tier2_resolver import resolve_tier2
         t2_res = resolve_tier2(text)
         if t2_res is not None:
+            action_key = f"tier2:{t2_res.get('action')}:{t2_res.get('target')}"
+            if record_and_check_action_loop(action_key):
+                trigger_loop_breaker(notify)
+                return
             handle_tier2_result(t2_res, notify)
             return
 
@@ -472,6 +609,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
         tier3_enabled = False
 
     if tier3_enabled and (kind == "clarify" or kind == "unclear"):
+        action_key = f"tier3:{text.strip()}"
+        if record_and_check_action_loop(action_key):
+            trigger_loop_breaker(notify)
+            return
         try:
             import tier3_agent
             t3_res = tier3_agent.run_tier3_agent(text)
@@ -531,6 +672,10 @@ def handle(text, stt_ms=None, notify=None, quiet=False):
 
             done, timer_reply = 0, None
             for _, action, arg, _, _ in payload:
+                action_key = f"tier1:{action}:{arg}"
+                if record_and_check_action_loop(action_key):
+                    trigger_loop_breaker(notify)
+                    return
                 try:
                     emit(notify, "Doing it", text)
                     if action.startswith("timer_"):
@@ -589,7 +734,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
                 time.sleep(2)
                 emit(notify, "Ready", ready_text(rec.wake))
             finally:
-                time.sleep(0.3)
+                time.sleep(0.7)
                 rec.paused = False
 
     def start_dictation():
@@ -650,6 +795,9 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
                 if armed_until[0] and time.time() > armed_until[0]:
                     armed_until[0] = 0
                     emit(notify, "Ready", ready_text(rec.wake))
+                continue
+            from audio_io import is_audio_playing_or_settling
+            if is_audio_playing_or_settling():
                 continue
             try:
                 if rec.dictating:
@@ -739,7 +887,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
                 line = say_line("reminder_done", label=t["label"]) if t.get("label") else say_line("timer_done")
                 say(line, notify)
             finally:
-                time.sleep(0.3)
+                time.sleep(0.7)
                 rec.paused = False
         emit(notify, "Ready", ready_text(rec.wake))
 
@@ -748,6 +896,7 @@ def run_voice_assistant(notify=None, controls=None, mode="ptt", mic="", wake_bac
     start_timer_loop(timer_done)
     threading.Thread(target=warm_cache, args=(APP_SAY,), daemon=True).start()
     threading.Thread(target=wake_loop, daemon=True).start()
+    set_disable_wake_fn(lambda: set_mode("ptt"))
     set_mode(mode)
 
     print("ready. ctrl+c to quit.")

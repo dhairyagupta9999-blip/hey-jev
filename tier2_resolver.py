@@ -52,8 +52,9 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
         }
 
     # B. System Targets (e.g. "open Bluetooth settings", "open Downloads folder", "open youtube", "open https://...")
-    sys_res = system_targets.resolve_system_target(text)
+    sys_res = system_targets.resolve_system_target(text, execute=False)
     if sys_res:
+        system_targets.execute_system_target(sys_res)
         latency_ms = int((time.perf_counter() - t0) * 1000)
         safety_engine.log_action(2, f"system_{sys_res['type']}", {"target": sys_res["label"]}, safety_engine.SAFE, "success")
         logger.trace_line(f"  [tier 2: system_target] {latency_ms}ms  $0.000000  type: {sys_res['type']} -> {sys_res['label']}")
@@ -101,8 +102,9 @@ def resolve_tier2(text: str) -> Optional[Dict[str, Any]]:
     # 3. Open / launch request
     if action == "open" and target:
         # 3a. Check if target is a system setting or folder phrased as "open X"
-        sys_sub = system_targets.resolve_system_target(target)
+        sys_sub = system_targets.resolve_system_target(target, execute=False)
         if sys_sub:
+            system_targets.execute_system_target(sys_sub)
             latency_ms = int((time.perf_counter() - t0) * 1000)
             safety_engine.log_action(2, f"system_{sys_sub['type']}", {"target": sys_sub["label"]}, safety_engine.SAFE, "success")
             logger.trace_line(f"  [tier 2: system_target] {latency_ms}ms  $0.000000  type: {sys_sub['type']} -> {sys_sub['label']}")

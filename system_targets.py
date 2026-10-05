@@ -101,8 +101,39 @@ def is_url(text: str) -> Optional[str]:
         return f"https://{t}"
     return None
 
-def resolve_system_target(text: str) -> Optional[Dict[str, Any]]:
-    """Resolve spoken target against Settings pages, system utilities, folders, or websites."""
+def execute_system_target(res: Dict[str, Any]) -> bool:
+    """Execute the action described by a resolved system target."""
+    if not res:
+        return False
+    target_type = res.get("type")
+    try:
+        if target_type == "setting":
+            os.startfile(res["uri"])
+            return True
+        elif target_type == "utility":
+            subprocess.Popen(["cmd", "/c", "start", "", res["cmd"]], shell=False)
+            return True
+        elif target_type == "folder":
+            path = res["path"]
+            if os.path.exists(path):
+                os.startfile(path)
+            else:
+                subprocess.Popen(["explorer.exe", path], shell=False)
+            return True
+        elif target_type in ("website", "search"):
+            webbrowser.open(res["url"])
+            return True
+    except Exception as exc:
+        print(f"  [system_target exec error]: {exc}")
+        return False
+    return False
+
+
+def resolve_system_target(text: str, execute: bool = False) -> Optional[Dict[str, Any]]:
+    """Resolve spoken target against Settings pages, system utilities, folders, or websites.
+    
+    If execute is True, executes the corresponding system action immediately.
+    """
     t_clean = text.lower().strip()
     # Strip common leading verbs
     t_target = re.sub(r"^(?:open|launch|start|show|go\s+to|bring\s+up)\s+(?:the\s+|my\s+)?", "", t_clean).strip()
@@ -111,73 +142,83 @@ def resolve_system_target(text: str) -> Optional[Dict[str, Any]]:
     # 1. Settings Pages
     for key, (uri, label) in SETTINGS_PAGES.items():
         if t_target == key or t_target == f"{key} settings" or t_target == f"settings for {key}":
-            os.startfile(uri)
-            return {
+            res = {
                 "type": "setting",
                 "uri": uri,
                 "label": label,
                 "line": f"Opening {label}."
             }
+            if execute:
+                execute_system_target(res)
+            return res
 
     # 2. System Utilities
     for key, (cmd, label) in SYSTEM_UTILITIES.items():
         if t_target == key:
-            subprocess.Popen(["cmd", "/c", "start", "", cmd], shell=False)
-            return {
+            res = {
                 "type": "utility",
                 "cmd": cmd,
                 "label": label,
                 "line": f"Opening {label}."
             }
+            if execute:
+                execute_system_target(res)
+            return res
 
     # 3. Standard Folders
     for key, (path, label) in STANDARD_FOLDERS.items():
         if t_target == key or t_target == f"{key} folder":
-            if os.path.exists(path):
-                os.startfile(path)
-            else:
-                subprocess.Popen(["explorer.exe", path], shell=False)
-            return {
+            res = {
                 "type": "folder",
                 "path": path,
                 "label": label,
                 "line": f"Opening {label}."
             }
+            if execute:
+                execute_system_target(res)
+            return res
 
     # 4. Websites
     # Direct URL
     normalized_url = is_url(t_target)
     if normalized_url:
-        webbrowser.open(normalized_url)
-        return {
+        res = {
             "type": "website",
             "url": normalized_url,
             "label": normalized_url,
             "line": f"Opening {normalized_url}."
         }
+        if execute:
+            execute_system_target(res)
+        return res
 
     # Known site by bare name
     if t_target in KNOWN_SITES:
         url = KNOWN_SITES[t_target]
-        webbrowser.open(url)
-        return {
+        res = {
             "type": "website",
             "url": url,
             "label": t_target.capitalize(),
             "line": f"Opening {t_target.capitalize()}."
         }
+        if execute:
+            execute_system_target(res)
+        return res
 
     # If explicitly phrased as "search for X" or "google X"
     search_m = re.match(r"^(?:search\s+for|google|web\s+search\s+for|search\s+the\s+web\s+for)\s+(.+)$", t_clean)
     if search_m:
         query = search_m.group(1).strip()
         search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-        webbrowser.open(search_url)
-        return {
+        res = {
             "type": "search",
             "url": search_url,
             "query": query,
             "line": f"Searching for {query}."
         }
+        if execute:
+            execute_system_target(res)
+        return res
 
     return None
+

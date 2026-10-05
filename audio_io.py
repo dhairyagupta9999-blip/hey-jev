@@ -44,15 +44,53 @@ def load_audio_file(path):
         return data, sr
 
 
+_PLAYBACK_LOCK = threading.Lock()
+_AUDIO_PLAYING_COUNT = 0
+_LAST_PLAYBACK_END_TIME = 0.0
+
+
+def set_playback_active(active: bool):
+    global _AUDIO_PLAYING_COUNT, _LAST_PLAYBACK_END_TIME
+    with _PLAYBACK_LOCK:
+        if active:
+            _AUDIO_PLAYING_COUNT += 1
+        else:
+            _AUDIO_PLAYING_COUNT = max(0, _AUDIO_PLAYING_COUNT - 1)
+            _LAST_PLAYBACK_END_TIME = time.time()
+
+
+def is_audio_playing_or_settling(settle_s: float = 0.700) -> bool:
+    """Return True if TTS or chime is currently playing or within 700ms after."""
+    with _PLAYBACK_LOCK:
+        if _AUDIO_PLAYING_COUNT > 0:
+            return True
+        return (time.time() - _LAST_PLAYBACK_END_TIME) < settle_s
+
+
+def reset_playback_state():
+    """Reset playback tracking state (primarily for unit testing)."""
+    global _AUDIO_PLAYING_COUNT, _LAST_PLAYBACK_END_TIME
+    with _PLAYBACK_LOCK:
+        _AUDIO_PLAYING_COUNT = 0
+        _LAST_PLAYBACK_END_TIME = 0.0
+
+
 def play_audio(path, blocking=True):
     """Play a WAV or MP3 audio file cleanly via sounddevice without winsound."""
     if not os.path.exists(path):
         print(f"  [audio_player] File not found: {path}")
         return
-    data, sr = load_audio_file(path)
-    sd.play(data, sr)
-    if blocking:
+    if not blocking:
+        threading.Thread(target=play_audio, args=(path, True), daemon=True).start()
+        return
+
+    set_playback_active(True)
+    try:
+        data, sr = load_audio_file(path)
+        sd.play(data, sr)
         sd.wait()
+    finally:
+        set_playback_active(False)
 
 
 def play_chime(kind):
@@ -64,7 +102,7 @@ def play_chime(kind):
     }
     path = chimes.get(kind)
     if path and os.path.exists(path):
-        threading.Thread(target=play_audio, args=(path, False), daemon=True).start()
+        play_audio(path, blocking=False)
 
 
 # --------------------------------------------------------------------------- Input: WASAPI Capture + VAD
@@ -125,6 +163,11 @@ class Recorder:
         self.preroll = collections.deque(maxlen=3)
 
     def _cb(self, indata, frames, time_info, status):
+        # Guard a: Pause microphone processing while TTS or chimes play, and for 700 ms after.
+        if is_audio_playing_or_settling():
+            if self.speech:
+                self._reset_segment()
+            return
         if self.on:
             self.frames.append(indata.copy())
         if not (self.wake or self.dictating) or self.paused:
